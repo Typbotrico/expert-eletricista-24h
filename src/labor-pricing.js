@@ -180,6 +180,18 @@ function hasPriceIntent(text) {
 
 function serviceMatches(text) {
   const n = normalize(text);
+
+  // Heurísticas fortes para frases comuns de orçamento.
+  if (/\b(trocar|troca|substituir|substituicao)\b.*\btomad/.test(n)) {
+    return [LABOR_SERVICES.find(s=>s.id==="tomada-troca")];
+  }
+  if (/\b(instalar|instalacao|colocar|colocacao)\b.*\btomad/.test(n)) {
+    if (/\b(novo ponto|ponto novo|sem eletroduto|rasgo|quebrar parede|alvenaria)\b/.test(n)) {
+      return [LABOR_SERVICES.find(s=>s.id==="ponto-alvenaria")];
+    }
+    return [LABOR_SERVICES.find(s=>s.id==="tomada-inst")];
+  }
+
   const scored = LABOR_SERVICES.map(s=>{
     let score = 0;
     for (const k of s.keywords) {
@@ -291,6 +303,53 @@ export async function buildLaborPricingContext(conversationText) {
     "Se faltarem detalhes que mudam muito o preço, não faça interrogatório: pergunte no máximo 1 ou 2 itens decisivos (por exemplo, existe eletroduto? haverá quebra?)."
   );
   return lines.join("\n");
+}
+
+export async function buildLaborDirectReply(text) {
+  if (!municipalities.length) {
+    try { await initLaborPricingGeo(); } catch {}
+  }
+
+  const city = detectCity(text);
+  const hintedUf = stateFromText(text);
+  if (!city) {
+    return hintedUf
+      ? "Qual cidade do serviço? [[AGUARDANDO_DADOS]]"
+      : "Qual cidade e UF do serviço? [[AGUARDANDO_DADOS]]";
+  }
+
+  const services = serviceMatches(text);
+  if (!services.length) return "";
+
+  const qty = quantityFromText(text);
+  const area = areaFromText(text);
+  const factor = cityFactor(city);
+  const discount = bulkDiscount(qty);
+  const a = adjustedService(services[0],factor,discount);
+
+  if (qty && ["ponto","unidade"].includes(a.unit)) {
+    const minTotal = a.min*qty;
+    const maxTotal = a.max*qty;
+    const recTotal = a.rec*qty;
+    return [
+      `Mão de obra para ${qty} ${a.unit === "ponto" ? "pontos" : "unidades"} em ${city.city}: ${formatBRL(minTotal)} a ${formatBRL(maxTotal)}.`,
+      `Eu cobraria: ${formatBRL(recTotal)}.`,
+      `Por ${a.unit}: ${formatBRL(a.min)} a ${formatBRL(a.max)}.`
+    ].join("\n");
+  }
+
+  if (area && a.unit === "m²") {
+    return [
+      `Mão de obra em ${city.city}: ${formatBRL(a.min)} a ${formatBRL(a.max)} por m².`,
+      `Para ${area} m²: ${formatBRL(a.min*area)} a ${formatBRL(a.max*area)}.`,
+      `Eu cobraria: ${formatBRL(a.rec*area)}.`
+    ].join("\n");
+  }
+
+  return [
+    `Mão de obra em ${city.city}: ${formatBRL(a.min)} a ${formatBRL(a.max)} por ${a.unit}.`,
+    `Eu cobraria: ${formatBRL(a.rec)}.`
+  ].join("\n");
 }
 
 export function laborPricingStatus() {

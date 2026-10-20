@@ -30,7 +30,7 @@ const normalizeIntent = s => String(s || "")
 
 function pricingIntent(text) {
   const n = normalizeIntent(text);
-  const asksPrice = /(quanto|preco|valor|custa|cobrar|orcamento|fica)/.test(n);
+  const asksPrice = /(quanto custa|quanto fica|quanto sai|quanto cobrar|qual o preco|preco|valor|orcamento|mao de obra|custo do material|valor do material|preco do material)/.test(n);
   if (!asksPrice) return "none";
 
   const explicitBoth =
@@ -462,9 +462,10 @@ async function processMessage(message) {
 
     const text = await messageToText(message);
     const previous = await history(hash);
-    const currentIntent = pricingIntent(text);
-    const intent = currentIntent === "none" ? followUpPricingIntent(text,previous) : currentIntent;
-    console.log("Intent routing:", {currentIntent,intent});
+    const technicalIntent = isTechnicalElectricalQuestion(text);
+    const currentIntent = technicalIntent ? "none" : pricingIntent(text);
+    const intent = currentIntent === "none" && !technicalIntent ? followUpPricingIntent(text,previous) : currentIntent;
+    console.log("Intent routing:", {technicalIntent,currentIntent,intent});
     const recentUserContext = previous.filter(m=>m?.role==="user").slice(-2).map(m=>String(m.content||""));
     const pricingQuery = [...recentUserContext,text].join("\n");
 

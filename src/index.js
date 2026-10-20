@@ -179,7 +179,7 @@ async function runAI(messages) {
   const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${SETTINGS.model}`,{
     method:"POST",
     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
-    body:JSON.stringify({messages,temperature:0.2,max_completion_tokens:1500})
+    body:JSON.stringify({messages,temperature:0.2,max_completion_tokens:1500,chat_template_kwargs:{enable_thinking:false}})
   });
   const data = await resp.json().catch(()=>({}));
   if (!resp.ok || data?.success === false) throw new Error(`Workers AI HTTP ${resp.status}`);

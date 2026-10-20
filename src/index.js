@@ -12,7 +12,7 @@ const SETTINGS = Object.freeze({
   monthlyQuestions: 150,
   periodDays: 30,
   maxCharsIn: 1200,
-  maxCharsOut: 1500,
+  maxCharsOut: 1000,
   freeClarificationReplies: 2,
   clarificationWindowMinutes: 30,
   defaultGlobalAiRepliesMonth: 3000

@@ -438,6 +438,32 @@ app.get("/health",async (_req,res)=>{
   });
 });
 
+app.get("/diagnostics/meta-subscription",async (req,res)=>{
+  try {
+    const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "687342103880596";
+    const version = graphVersion();
+    const token = process.env.META_ACCESS_TOKEN;
+    const method = req.query?.repair === "1" ? "POST" : "GET";
+    const url = `https://graph.facebook.com/${version}/${wabaId}/subscribed_apps`;
+    const resp = await fetch(url,{
+      method,
+      headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"}
+    });
+    const data = await resp.json().catch(()=>({}));
+    res.status(resp.ok?200:502).json({
+      ok:resp.ok,
+      action:method==="POST"?"subscribe":"status",
+      http:resp.status,
+      success:data?.success===true,
+      app_count:Array.isArray(data?.data)?data.data.length:undefined,
+      apps:Array.isArray(data?.data)?data.data.map(x=>({id:x.id,name:x.name})).slice(0,10):undefined,
+      error:data?.error?{code:data.error.code,type:data.error.type,message:String(data.error.message||"").slice(0,200)}:undefined
+    });
+  } catch (err) {
+    res.status(500).json({ok:false,error:String(err?.message||"erro").slice(0,200)});
+  }
+});
+
 app.get("/diagnostics/runtime",async (_req,res)=>{
   try {
     const month = new Date().toISOString().slice(0,7);
@@ -475,6 +501,7 @@ app.get("/webhook",(req,res)=>{
 });
 
 app.post("/webhook",express.raw({type:"application/json",limit:"150kb"}),(req,res)=>{
+  console.log("Webhook POST received", {hasSignature:Boolean(req.headers["x-hub-signature-256"]), bytes:Buffer.isBuffer(req.body)?req.body.length:0});
   const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from("");
   const sig = req.headers["x-hub-signature-256"] || "";
   const secret = process.env.META_APP_SECRET || "";

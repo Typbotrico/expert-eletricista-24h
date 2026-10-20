@@ -157,6 +157,26 @@ function enforceElectricalSafetyText(raw) {
   return text;
 }
 
+function enforceLoadSizingConsistency(userText,raw) {
+  const source = String(userText || "");
+  const answer = String(raw || "");
+  const currentMatch =
+    source.match(/(?:corrente|amperagem)(?:\s+total)?(?:\s+de)?\s*(\d+(?:[.,]\d+)?)\s*(?:a|amp|amperes)\b/i) ||
+    source.match(/total\s+de\s*(\d+(?:[.,]\d+)?)\s*(?:a|amp|amperes)\b/i);
+  const breakerMatch = answer.match(/disjuntor(?:\s+de)?\s*(\d+(?:[.,]\d+)?)\s*a\b/i);
+  if (!currentMatch || !breakerMatch) return answer;
+
+  const loadA = Number(currentMatch[1].replace(",","."));
+  const breakerA = Number(breakerMatch[1].replace(",","."));
+  if (!Number.isFinite(loadA) || !Number.isFinite(breakerA) || breakerA >= loadA) return answer;
+
+  return [
+    `Você informou carga total de ${loadA.toLocaleString("pt-BR")} A. Então não vou fechar um disjuntor abaixo dessa corrente.`,
+    "Para dimensionar corretamente, preciso confirmar a tensão e como o cabo será instalado (eletroduto, agrupamento e distância).",
+    "Com esses dados eu fecho cabo e proteção sem chutar valor."
+  ].join("\n") + " [[AGUARDANDO_DADOS]]";
+}
+
 function parseExpertAnswer(raw) {
   raw = enforceElectricalSafetyText(String(raw || ""));
   return {
@@ -620,7 +640,8 @@ async function processMessage(message) {
       ...previousForAI,
       {role:"user",content:text}
     ]);
-    const answer = parseExpertAnswer(raw);
+    const checkedRaw = technicalIntent ? enforceLoadSizingConsistency(text,raw) : raw;
+    const answer = parseExpertAnswer(checkedRaw);
     if (!answer.answer) throw new Error("IA não retornou texto");
 
     await sendWhatsApp(phone,answer.answer);

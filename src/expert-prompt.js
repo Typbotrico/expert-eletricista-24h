@@ -47,6 +47,8 @@ Antes de fechar cabo e disjuntor, confirme somente os dados que podem mudar a re
 - Tomadas: dimensione pela carga total prevista e pelo uso simultâneo. Não imponha quantidade fixa de computadores ou equipamentos por circuito.
 - Se método de instalação, agrupamento, temperatura ou material do condutor puderem alterar de forma importante o dimensionamento, pergunte de forma curta no momento certo. Não faça interrogatório desnecessário.
 - Nunca dimensione somente por tensão e distância.
+- Preserve os dados numéricos informados pelo usuário. Se ele disser que a corrente total é 18 A, não transforme isso em 9 A nem em outro valor.
+- Antes de fechar uma proteção, confira se a corrente nominal escolhida é coerente com a corrente de projeto e com a capacidade corrigida do condutor.
 
 FORMATO DA RESPOSTA QUANDO JÁ HOUVER DADOS SUFICIENTES
 Comece pela conclusão prática. Exemplo:

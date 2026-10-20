@@ -298,13 +298,17 @@ async function transcribeAudio(buffer) {
 async function inspectImage(buffer,mimeType,caption) {
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_AI_TOKEN;
-  const dataUrl = `data:${mimeType.startsWith("image/") ? mimeType : "image/jpeg"};base64,${buffer.toString("base64")}`;
+  const safeMime = mimeType.startsWith("image/") ? mimeType : "image/jpeg";
+  const dataUrl = `data:${safeMime};base64,${buffer.toString("base64")}`;
   const prompt = [
-    "Analise esta foto para auxiliar um eletricista brasileiro.",
-    "Descreva de forma técnica e curta SOMENTE o que estiver visível.",
-    "Leia etiquetas e valores quando estiverem legíveis; identifique componentes, sinais de aquecimento, dano, improviso ou risco aparente.",
-    "Não invente tensão, corrente, bitola, estado interno ou conformidade que a foto não permita confirmar.",
-    caption ? `Pergunta/legenda do usuário: ${caption}` : "O usuário não enviou legenda."
+    "Analise de verdade a imagem anexada. Ela está disponível nesta mesma mensagem.",
+    "Você auxilia eletricistas brasileiros em instalações residenciais e prediais.",
+    "Primeiro identifique o componente ou conjunto principal visível.",
+    "Depois diga, em poucas frases, o que ele faz e qualquer detalhe elétrico visível importante.",
+    "Leia etiquetas e valores somente quando estiverem legíveis.",
+    "Não invente tensão, corrente, bitola, ligação interna ou conformidade que a foto não permita confirmar.",
+    "Se houver tomada, interruptor, DR, DPS, disjuntor, quadro, barramento, cabo ou conexão, diga isso explicitamente.",
+    caption ? `Pergunta do usuário sobre a foto: ${caption}` : "Pergunta do usuário: identifique o que aparece na foto."
   ].join("\n");
 
   const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${SETTINGS.visionModel}`,{
@@ -312,24 +316,37 @@ async function inspectImage(buffer,mimeType,caption) {
     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
     body:JSON.stringify({
       messages:[
-        {role:"system",content:"Você faz inspeção visual auxiliar de instalações elétricas. Seja factual e conciso."},
-        {role:"user",content:prompt}
+        {role:"system",content:"Você é um inspetor visual técnico de elétrica. Observe a imagem fornecida e seja factual, simples e direto."},
+        {role:"user",content:[
+          {type:"text",text:prompt},
+          {type:"image_url",image_url:{url:dataUrl}}
+        ]}
       ],
-      image:dataUrl,
       temperature:0.1,
-      max_completion_tokens:500,
+      max_tokens:600,
       chat_template_kwargs:{enable_thinking:false}
     })
   });
+
   const data = await resp.json().catch(()=>({}));
   if (!resp.ok || data?.success === false) throw new Error(`Visão HTTP ${resp.status}`);
+
   const text =
     data?.result?.response ??
     data?.response ??
     data?.result?.choices?.[0]?.message?.content ??
     data?.choices?.[0]?.message?.content;
+
   if (typeof text !== "string" || !text.trim()) throw new Error("Imagem sem análise");
-  return text.trim().slice(0,900);
+
+  const cleaned = text.trim();
+  const denial = normalizeIntent(cleaned);
+  if (/(imagem nao chegou|nao recebi a imagem|nao tenho acesso a imagem|nao consigo ver a imagem|envie a foto|reenvie a foto)/.test(denial)) {
+    throw new Error("Modelo de visão não recebeu pixels");
+  }
+
+  console.log("Vision analysis ok");
+  return cleaned.slice(0,900);
 }
 
 async function messageToText(message) {

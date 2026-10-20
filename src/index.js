@@ -48,6 +48,19 @@ function pricingIntent(text) {
   return "labor";
 }
 
+function previousPricingIntent(previous) {
+  const recentUsers = [...previous].reverse().filter(m=>m?.role==="user").slice(0,2);
+  for (const m of recentUsers) {
+    const i = pricingIntent(String(m?.content || ""));
+    if (i !== "none") return i;
+  }
+  const lastAssistant = [...previous].reverse().find(m=>m?.role==="assistant");
+  const a = normalizeIntent(lastAssistant?.content || "");
+  if (a.startsWith("mao de obra") || a.includes("qual cidade e uf do servico")) return "labor";
+  if (a.startsWith("material") || a.includes("qual material voce quer cotar")) return "material";
+  return "none";
+}
+
 const requiredEnv = [
   "DATABASE_URL",
   "META_ACCESS_TOKEN",
@@ -400,36 +413,61 @@ async function processMessage(message) {
 
     const text = await messageToText(message);
     const previous = await history(hash);
-    const intent = pricingIntent(text);
+    const currentIntent = pricingIntent(text);
+    const intent = currentIntent === "none" ? previousPricingIntent(previous) : currentIntent;
+    const recentUserContext = previous.filter(m=>m?.role==="user").slice(-2).map(m=>String(m.content||""));
+    const pricingQuery = [...recentUserContext,text].join("\n");
 
     if (intent === "labor") {
-      const direct = await buildLaborDirectReply(text);
-      if (direct) {
-        const answer = parseExpertAnswer(direct);
-        if (globalCounter) { await releaseCounter(globalCounter); globalCounter = null; }
-        await sendWhatsApp(phone,answer.answer);
-        sent = true;
-        await markPending(hash,answer.pending,decision);
-        await saveHistory(hash,[...previous,{role:"user",content:text},{role:"assistant",content:answer.answer}]);
-        await pool.query("UPDATE processed_messages SET status='sent_labor_direct' WHERE id_hash=$1",[idHash]);
-        console.log("Direct labor quote sent");
-        return;
-      }
+      const direct = await buildLaborDirectReply(pricingQuery);
+      const answer = parseExpertAnswer(direct || "Qual serviço você quer orçar? [[AGUARDANDO_DADOS]]");
+      if (globalCounter) { await releaseCounter(globalCounter); globalCounter = null; }
+      await sendWhatsApp(phone,answer.answer);
+      sent = true;
+      await markPending(hash,answer.pending,decision);
+      await saveHistory(hash,[...previous,{role:"user",content:text},{role:"assistant",content:answer.answer}]);
+      await pool.query("UPDATE processed_messages SET status='sent_labor_direct' WHERE id_hash=$1",[idHash]);
+      console.log("Direct labor quote sent");
+      return;
     }
 
     if (intent === "material") {
-      const direct = await buildMaterialDirectReply(text);
-      if (direct) {
-        const answer = parseExpertAnswer(direct);
-        if (globalCounter) { await releaseCounter(globalCounter); globalCounter = null; }
-        await sendWhatsApp(phone,answer.answer);
-        sent = true;
-        await markPending(hash,answer.pending,decision);
-        await saveHistory(hash,[...previous,{role:"user",content:text},{role:"assistant",content:answer.answer}]);
-        await pool.query("UPDATE processed_messages SET status='sent_material_direct' WHERE id_hash=$1",[idHash]);
-        console.log("Direct material quote sent");
-        return;
+      const direct = await buildMaterialDirectReply(pricingQuery);
+      const answer = parseExpertAnswer(direct || "Qual material você quer cotar? [[AGUARDANDO_DADOS]]");
+      if (globalCounter) { await releaseCounter(globalCounter); globalCounter = null; }
+      await sendWhatsApp(phone,answer.answer);
+      sent = true;
+      await markPending(hash,answer.pending,decision);
+      await saveHistory(hash,[...previous,{role:"user",content:text},{role:"assistant",content:answer.answer}]);
+      await pool.query("UPDATE processed_messages SET status='sent_material_direct' WHERE id_hash=$1",[idHash]);
+      console.log("Direct material quote sent");
+      return;
+    }
+
+    if (intent === "both") {
+      const [laborDirect,materialDirect] = await Promise.all([
+        buildLaborDirectReply(pricingQuery),
+        buildMaterialDirectReply(pricingQuery)
+      ]);
+      let direct;
+      if ((laborDirect || "").includes("[[AGUARDANDO_DADOS]]") || (materialDirect || "").includes("[[AGUARDANDO_DADOS]]")) {
+        direct = materialDirect?.includes("Qual material")
+          ? materialDirect
+          : laborDirect?.includes("Qual cidade")
+            ? laborDirect
+            : (materialDirect || laborDirect || "Qual cidade e UF? [[AGUARDANDO_DADOS]]");
+      } else {
+        direct = `MÃO DE OBRA\n${laborDirect || "Não consegui identificar o serviço."}\n\nMATERIAL\n${materialDirect || "Não consegui identificar o material."}`;
       }
+      const answer = parseExpertAnswer(direct);
+      if (globalCounter) { await releaseCounter(globalCounter); globalCounter = null; }
+      await sendWhatsApp(phone,answer.answer);
+      sent = true;
+      await markPending(hash,answer.pending,decision);
+      await saveHistory(hash,[...previous,{role:"user",content:text},{role:"assistant",content:answer.answer}]);
+      await pool.query("UPDATE processed_messages SET status='sent_both_direct' WHERE id_hash=$1",[idHash]);
+      console.log("Direct combined quote sent");
+      return;
     }
 
     let pricingContext = "";

@@ -125,8 +125,32 @@ function chooseCharge(s) {
   return "question";
 }
 
+function enforceElectricalSafetyText(raw) {
+  let text = String(raw || "");
+  const n = normalizeIntent(text);
+
+  const saysPeThroughDr =
+    /(terra|condutor pe|condutor de protecao|fio terra).{0,45}(passa|passar|entra|entrar|sai|sair).{0,30}\bdr\b/.test(n) &&
+    !/(terra|condutor pe|condutor de protecao|fio terra).{0,45}(nao|nunca).{0,20}(passa|passar|entra|entrar).{0,30}\bdr\b/.test(n);
+
+  const saysJoinAfterDr =
+    /(juntar|unir|pontear|ligar).{0,25}(neutro|n).{0,20}(terra|pe).{0,35}(depois|apos).{0,20}\bdr\b/.test(n);
+
+  if (saysPeThroughDr || saysJoinAfterDr) {
+    return [
+      "Correção importante:",
+      "- O PE/terra NÃO passa pelo DR. Ele vai direto ao barramento PE e às carcaças/equipamentos.",
+      "- Pelo DR passam somente os condutores ativos do circuito protegido; em fase + neutro, passam fase e neutro.",
+      "- Depois do DR, neutro e PE não devem ser unidos.",
+      "Antes de orientar a ligação: qual é o esquema de aterramento (TT, TN-S, TN-C-S ou outro) e os barramentos N e PE estão separados?"
+    ].join("\n") + " [[AGUARDANDO_DADOS]]";
+  }
+
+  return text;
+}
+
 function parseExpertAnswer(raw) {
-  raw = String(raw || "");
+  raw = enforceElectricalSafetyText(String(raw || ""));
   return {
     answer: raw.replace(/\[\[AGUARDANDO_DADOS\]\]/g,"").trim().slice(0,SETTINGS.maxCharsOut),
     pending: raw.includes("[[AGUARDANDO_DADOS]]")

@@ -131,19 +131,26 @@ export async function initLaborPricingGeo(force=false) {
 
 function detectCity(text) {
   if (!municipalities.length) return null;
-  const n = ` ${normalize(text)} `;
+  const normalizedText = normalize(text);
+  const n = ` ${normalizedText} `;
   const hintedUf = stateFromText(text);
-  let best = null;
+  const candidates = [];
 
   for (const [name,items] of byName.entries()) {
-    if (name.length < 5) continue;
+    if (name.length < 4) continue;
     if (!n.includes(` ${name} `)) continue;
     const filtered = hintedUf ? items.filter(x=>x.uf===hintedUf) : items;
     if (filtered.length !== 1) continue;
-    const item = filtered[0];
-    if (!best || name.length > best.norm.length) best = item;
+    candidates.push(filtered[0]);
   }
-  return best;
+
+  if (!candidates.length) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  const stateName = Object.entries(STATE_NAMES).find(([,uf])=>uf===hintedUf)?.[0] || "";
+  const filtered = candidates.filter(x=>x.norm !== stateName);
+  const pool = filtered.length ? filtered : candidates;
+  return pool.sort((a,b)=>normalizedText.indexOf(a.norm)-normalizedText.indexOf(b.norm))[0];
 }
 
 function populationFactor(pop) {

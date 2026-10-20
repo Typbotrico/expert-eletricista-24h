@@ -426,6 +426,44 @@ async function processMessage(message) {
   let subscriber = await userState(hash);
   let chargeType = null, globalCounter = null, sent = false;
   try {
+    const inviteCode = String(process.env.PILOT_INVITE_CODE || "").trim().toUpperCase();
+    const incomingText = message?.type === "text" ? String(message?.text?.body || "").trim() : "";
+    const normalizedInvite = incomingText.toUpperCase().replace(/\s+/g," ").trim();
+    const inviteMatch = inviteCode && (normalizedInvite === `ATIVAR ${inviteCode}` || normalizedInvite === inviteCode);
+
+    if (inviteMatch) {
+      if (subscriber?.status === "active" && new Date(subscriber.period_end) > new Date()) {
+        const remaining = Math.max(0,subscriber.question_limit-subscriber.questions_used);
+        await sendWhatsApp(phone,`Seu acesso já está ativo. Você ainda tem ${remaining} perguntas neste período.`);
+        sent = true;
+        await pool.query("UPDATE processed_messages SET status='pilot_invite_already_active' WHERE id_hash=$1",[idHash]);
+        return;
+      }
+
+      const maxPilot = Math.max(1,Number(process.env.PILOT_INVITE_MAX || 20));
+      const count = await pool.query("SELECT COUNT(*)::int AS qty FROM subscribers WHERE status='active' AND period_end>NOW()");
+      if (Number(count.rows[0]?.qty || 0) >= maxPilot) {
+        await sendWhatsApp(phone,"As vagas deste lote de testes já foram preenchidas. Fale com o responsável pelo Expert.");
+        sent = true;
+        await pool.query("UPDATE processed_messages SET status='pilot_invite_full' WHERE id_hash=$1",[idHash]);
+        return;
+      }
+
+      const start = new Date();
+      const end = new Date(start.getTime()+SETTINGS.periodDays*86400000);
+      await pool.query(
+        "INSERT INTO subscribers(user_hash,status,period_start,period_end,question_limit,questions_used,pending_until,clarification_left) VALUES($1,'active',$2,$3,$4,0,NULL,0) ON CONFLICT(user_hash) DO UPDATE SET status='active',period_start=EXCLUDED.period_start,period_end=EXCLUDED.period_end,question_limit=EXCLUDED.question_limit,questions_used=0,pending_until=NULL,clarification_left=0,updated_at=NOW()",
+        [hash,start,end,SETTINGS.monthlyQuestions]
+      );
+      await pool.query("INSERT INTO admin_audit(user_hash,action) VALUES($1,'pilot_invite_activate')",[hash]);
+      subscriber = await userState(hash);
+      await sendWhatsApp(phone,`Acesso liberado ao Expert Eletricista 24H. Você tem ${SETTINGS.monthlyQuestions} perguntas pelos próximos ${SETTINGS.periodDays} dias.`);
+      sent = true;
+      await pool.query("UPDATE processed_messages SET status='pilot_invite_activated' WHERE id_hash=$1",[idHash]);
+      console.log("Pilot invite activated");
+      return;
+    }
+
     if (!subscriber && process.env.PILOT_AUTO_ACTIVATE_FIRST_USER === "true") {
       const start = new Date();
       const end = new Date(start.getTime()+SETTINGS.periodDays*86400000);

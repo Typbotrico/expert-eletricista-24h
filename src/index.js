@@ -28,21 +28,26 @@ const normalizeIntent = s => String(s || "")
   .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
   .toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
 
+function hasExplicitCommercialPriceRequest(text) {
+  const n = normalizeIntent(text);
+  return /(quanto custa|quanto fica|quanto sai|quanto cobrar|qual o preco|preco|orcamento|mao de obra|valor do servico|valor da instalacao|valor da mao de obra|valor do material|valor do produto|valor da peca|custo do material|custo da peca)/.test(n);
+}
+
 function pricingIntent(text) {
   const n = normalizeIntent(text);
-  const asksPrice = /(quanto custa|quanto fica|quanto sai|quanto cobrar|qual o preco|preco|valor|orcamento|mao de obra|custo do material|valor do material|preco do material)/.test(n);
-  if (!asksPrice) return "none";
+  if (!hasExplicitCommercialPriceRequest(n)) return "none";
 
   const explicitBoth =
     /(material e mao de obra|mao de obra e material|material mais mao de obra|mao de obra mais material|material \+ mao de obra|com material e instalacao|incluindo material|material incluso|com material incluso|valor total com material|servico completo com material)/.test(n);
   if (explicitBoth) return "both";
 
   const labor =
-    /(mao de obra|valor do servico|preco do servico|quanto cobrar|cobrar para|instalar|instalacao|instale|trocar|troca de|substituir|substituicao|montar|montagem|passar cabo|passagem de cabo|fazer ponto|novo ponto|reforma eletrica|refiacao|visita tecnica|diagnostico|reparo|conserto)/.test(n);
+    /(mao de obra|valor do servico|valor da instalacao|valor da mao de obra|quanto cobrar|cobrar para|orcamento.*(instalar|instalacao|trocar|montar|reparo|servico))/.test(n);
   if (labor) return "labor";
 
   const material =
-    /(material|materiais|insumo|insumos|cabo|fio |metro do fio|metro do cabo|dr\b|dps\b|disjuntor|tomada|interruptor|eletroduto|conduite|quadro|barramento|haste|wago|conector|fita isolante)/.test(n);
+    /(valor do material|valor do produto|valor da peca|custo do material|custo da peca|quanto custa|quanto sai|qual o preco|preco).*(material|cabo|fio|dr\b|dps\b|disjuntor|tomada|interruptor|eletroduto|conduite|quadro|barramento|haste|wago|conector|fita isolante)/.test(n) ||
+    /(material|cabo|fio|dr\b|dps\b|disjuntor|tomada|interruptor|eletroduto|conduite|quadro|barramento|haste|wago|conector|fita isolante).*(quanto custa|quanto sai|qual o preco|preco|valor do material|valor do produto|valor da peca)/.test(n);
   if (material) return "material";
 
   return "labor";
@@ -50,25 +55,29 @@ function pricingIntent(text) {
 
 function isTechnicalElectricalQuestion(text) {
   const n = normalizeIntent(text);
-  const price = /(quanto custa|quanto fica|quanto cobrar|preco|valor|orcamento|mao de obra|material incluso)/.test(n);
-  if (price) return false;
-  const electrical = /(dr\b|idr\b|dps\b|disjuntor|quadro|barramento|aterramento|terra\b|condutor pe|\bpe\b|\bpen\b|neutro|fase|tensao|corrente|potencia|cabo|fio\b|bitola|tomada|interruptor|chuveiro|circuito|borne|entrada|saida|ligacao|diagrama|esquema)/.test(n);
-  const question = /(como|qual|quais|onde|por que|porque|o que|pra que|para que|serve|funciona|ligar|instalar|trocar|testar|medir|identificar|dimensionar|calcular|entrada|saida|borne|passo a passo|esquema|diagrama|posso|devo)/.test(n);
-  return electrical && question;
+  if (hasExplicitCommercialPriceRequest(n)) return false;
+
+  const electrical =
+    /(dr\b|idr\b|dps\b|disjuntor|quadro|barramento|aterramento|terra\b|condutor pe|\bpe\b|\bpen\b|neutro|fase|tensao|corrente|potencia|cabo|fio\b|bitola|tomada|tomadas|interruptor|chuveiro|circuito|circuitos|borne|entrada|saida|ligacao|diagrama|esquema|computador|computadores|pc\b|lampada|lampadas|ponto eletrico|pontos eletricos|carga|amperagem|instalacao eletrica)/.test(n);
+
+  const technicalForm =
+    /(como|qual|quais|quantos|quantas|onde|por que|porque|o que|pra que|para que|serve|funciona|ligar|instalar|trocar|testar|medir|identificar|dimensionar|calcular|entrada|saida|borne|passo a passo|esquema|diagrama|posso|pode|podem|devo|preciso|material usar|material preciso|cabo usar|disjuntor usar)/.test(n);
+
+  return electrical && technicalForm;
 }
 
 function followUpPricingIntent(text,previous) {
   const n = normalizeIntent(text);
   if (isTechnicalElectricalQuestion(text)) return "none";
+  if (hasExplicitCommercialPriceRequest(text)) return pricingIntent(text);
 
-  // Só respostas curtas podem continuar um orçamento anterior.
+  // Continuação de orçamento só vale para respostas curtas ao dado que o Expert acabou de pedir.
   if (n.length > 90 || String(text || "").includes("?")) return "none";
 
   const lastAssistant = [...previous].reverse().find(m=>m?.role==="assistant");
   const a = normalizeIntent(lastAssistant?.content || "");
   if (!a) return "none";
 
-  // Só mantém o modo de preço quando a última resposta estava esperando um dado do orçamento.
   const asksLocation = a.includes("qual cidade e uf") || a.includes("qual cidade do servico");
   const asksMaterial = a.includes("qual material voce quer cotar");
   const asksService = a.includes("qual servico voce quer orcar");
@@ -80,8 +89,16 @@ function followUpPricingIntent(text,previous) {
       if (i !== "none") return i;
     }
   }
-  if (asksMaterial) return "material";
-  if (asksService) return "labor";
+
+  if (asksMaterial) {
+    const namesMaterial = /(dr\b|dps\b|disjuntor|cabo|fio\b|tomada|interruptor|eletroduto|conduite|quadro|barramento|haste|wago|conector|fita isolante)/.test(n);
+    return namesMaterial ? "material" : "none";
+  }
+
+  if (asksService) {
+    const namesService = /(instalar|instalacao|trocar|troca|montar|montagem|quadro|qdc|tomada|chuveiro|circuito|reparo|diagnostico|aterramento|refiacao)/.test(n);
+    return namesService ? "labor" : "none";
+  }
 
   return "none";
 }

@@ -48,16 +48,33 @@ function pricingIntent(text) {
   return "labor";
 }
 
-function previousPricingIntent(previous) {
-  const recentUsers = [...previous].reverse().filter(m=>m?.role==="user").slice(0,2);
-  for (const m of recentUsers) {
-    const i = pricingIntent(String(m?.content || ""));
-    if (i !== "none") return i;
-  }
+function followUpPricingIntent(text,previous) {
+  const n = normalizeIntent(text);
+
+  // Pergunta técnica nova SEMPRE sai do modo orçamento, mesmo que a conversa anterior fosse de preço.
+  const technicalQuestion =
+    /(como faco|como fazer|como instalar|como ligar|como trocar|como substituir|como testar|como medir|como identificar|como dimensionar|como funciona|onde ligar|qual borne|qual fio|qual cabo|qual disjuntor|qual bitola|o que e|por que|porque|posso ligar|devo ligar|diagrama|esquema|passo a passo)/.test(n);
+  if (technicalQuestion) return "none";
+
   const lastAssistant = [...previous].reverse().find(m=>m?.role==="assistant");
   const a = normalizeIntent(lastAssistant?.content || "");
-  if (a.startsWith("mao de obra") || a.includes("qual cidade e uf do servico")) return "labor";
-  if (a.startsWith("material") || a.includes("qual material voce quer cotar")) return "material";
+  if (!a) return "none";
+
+  // Só mantém o modo de preço quando a última resposta estava esperando um dado do orçamento.
+  const asksLocation = a.includes("qual cidade e uf") || a.includes("qual cidade do servico");
+  const asksMaterial = a.includes("qual material voce quer cotar");
+  const asksService = a.includes("qual servico voce quer orcar");
+
+  if (asksLocation) {
+    const priorUsers = [...previous].reverse().filter(m=>m?.role==="user");
+    for (const m of priorUsers) {
+      const i = pricingIntent(String(m?.content || ""));
+      if (i !== "none") return i;
+    }
+  }
+  if (asksMaterial) return "material";
+  if (asksService) return "labor";
+
   return "none";
 }
 
@@ -414,7 +431,8 @@ async function processMessage(message) {
     const text = await messageToText(message);
     const previous = await history(hash);
     const currentIntent = pricingIntent(text);
-    const intent = currentIntent === "none" ? previousPricingIntent(previous) : currentIntent;
+    const intent = currentIntent === "none" ? followUpPricingIntent(text,previous) : currentIntent;
+    console.log("Intent routing:", {currentIntent,intent});
     const recentUserContext = previous.filter(m=>m?.role==="user").slice(-2).map(m=>String(m.content||""));
     const pricingQuery = [...recentUserContext,text].join("\n");
 

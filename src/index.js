@@ -179,11 +179,19 @@ async function runAI(messages) {
   const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${SETTINGS.model}`,{
     method:"POST",
     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
-    body:JSON.stringify({messages,temperature:0.2,max_tokens:500})
+    body:JSON.stringify({messages,temperature:0.2,max_completion_tokens:500})
   });
   const data = await resp.json().catch(()=>({}));
   if (!resp.ok || data?.success === false) throw new Error(`Workers AI HTTP ${resp.status}`);
-  const text = data?.result?.response ?? data?.response ?? data?.result?.result?.response;
+  const text =
+    data?.result?.response ??
+    data?.response ??
+    data?.result?.result?.response ??
+    data?.result?.choices?.[0]?.message?.content ??
+    data?.choices?.[0]?.message?.content;
+  if (!text && process.env.AI_DEBUG_SHAPE === "true") {
+    console.log("Workers AI response keys:", Object.keys(data || {}), Object.keys(data?.result || {}));
+  }
   return typeof text === "string" ? text.trim() : "";
 }
 

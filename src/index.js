@@ -438,6 +438,39 @@ app.get("/health",async (_req,res)=>{
   });
 });
 
+app.get("/diagnostics/meta-access",async (_req,res)=>{
+  try {
+    const token = process.env.META_ACCESS_TOKEN;
+    const version = graphVersion();
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "687342103880596";
+    const checks = [
+      ["me",`https://graph.facebook.com/${version}/me?fields=id,name`],
+      ["permissions",`https://graph.facebook.com/${version}/me/permissions`],
+      ["phone",`https://graph.facebook.com/${version}/${phoneId}?fields=id,display_phone_number,verified_name,quality_rating,status`],
+      ["waba",`https://graph.facebook.com/${version}/${wabaId}?fields=id,name,currency,timezone_id`]
+    ];
+    const out = {};
+    for (const [name,url] of checks) {
+      const r = await fetch(url,{headers:{Authorization:`Bearer ${token}`}});
+      const data = await r.json().catch(()=>({}));
+      out[name] = {
+        ok:r.ok,
+        http:r.status,
+        error:data?.error?{code:data.error.code,type:data.error.type,message:String(data.error.message||"").slice(0,180)}:undefined,
+        id:data?.id,
+        name:data?.name,
+        status:data?.status,
+        quality_rating:data?.quality_rating,
+        display_phone_number:data?.display_phone_number
+      };
+    }
+    res.json(out);
+  } catch (err) {
+    res.json({fatal:String(err?.message||"erro").slice(0,200)});
+  }
+});
+
 app.get("/diagnostics/meta-subscription",async (req,res)=>{
   try {
     const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "687342103880596";

@@ -25,9 +25,7 @@ const requiredEnv = [
   "WEBHOOK_VERIFY_TOKEN",
   "WHATSAPP_PHONE_NUMBER_ID",
   "CLOUDFLARE_ACCOUNT_ID",
-  "CLOUDFLARE_AI_TOKEN",
-  "USER_HASH_SECRET",
-  "ADMIN_API_KEY"
+  "CLOUDFLARE_AI_TOKEN"
 ];
 
 const pool = new Pool({
@@ -45,8 +43,8 @@ const phoneOk = s => /^\d{10,15}$/.test(s || "");
 const normalizePhone = s => String(s || "").replace(/\D/g,"");
 const sha256 = s => crypto.createHash("sha256").update(s).digest("hex");
 const phoneHash = phone => {
-  const pepper = process.env.USER_HASH_SECRET || "";
-  if (pepper.length < 16) throw new Error("USER_HASH_SECRET inválido");
+  const pepper = process.env.USER_HASH_SECRET || process.env.META_APP_SECRET || "";
+  if (pepper.length < 16) throw new Error("Segredo de hash indisponível");
   if (!phoneOk(phone)) throw new Error("Número inválido");
   return sha256(`${pepper}:${phone}`);
 };
@@ -194,7 +192,7 @@ async function processMessage(message) {
   if (!phoneOk(phone) || !message?.id) return;
 
   const hash = phoneHash(phone);
-  const idHash = sha256(`${process.env.USER_HASH_SECRET}:meta:${message.id}`);
+  const idHash = sha256(`${process.env.USER_HASH_SECRET || process.env.META_APP_SECRET}:meta:${message.id}`);
   const inserted = await pool.query("INSERT INTO processed_messages(id_hash,status) VALUES($1,'received') ON CONFLICT(id_hash) DO NOTHING RETURNING id_hash",[idHash]);
   if (inserted.rowCount !== 1) return;
 
@@ -315,7 +313,8 @@ app.use(express.json({limit:"50kb"}));
 
 app.post("/admin/:action",async (req,res)=>{
   const key = process.env.ADMIN_API_KEY || "";
-  if (key.length<24 || !safeEqual(req.headers.authorization || "",`Bearer ${key}`)) return res.status(401).json({error:"Não autorizado"});
+  if (key.length<24) return res.status(503).json({error:"Admin ainda não configurado"});
+  if (!safeEqual(req.headers.authorization || "",`Bearer ${key}`)) return res.status(401).json({error:"Não autorizado"});
 
   const phone = normalizePhone(req.body?.phone);
   if (!phoneOk(phone)) return res.status(400).json({error:"Telefone inválido"});

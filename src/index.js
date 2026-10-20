@@ -24,6 +24,30 @@ const SETTINGS = Object.freeze({
   defaultGlobalAiRepliesMonth: 3000
 });
 
+const normalizeIntent = s => String(s || "")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+  .toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+
+function pricingIntent(text) {
+  const n = normalizeIntent(text);
+  const asksPrice = /(quanto|preco|valor|custa|cobrar|orcamento|fica)/.test(n);
+  if (!asksPrice) return "none";
+
+  const explicitBoth =
+    /(material e mao de obra|mao de obra e material|material mais mao de obra|mao de obra mais material|material \+ mao de obra|com material e instalacao|incluindo material|material incluso|com material incluso|valor total com material|servico completo com material)/.test(n);
+  if (explicitBoth) return "both";
+
+  const labor =
+    /(mao de obra|valor do servico|preco do servico|quanto cobrar|cobrar para|instalar|instalacao|instale|trocar|troca de|substituir|substituicao|montar|montagem|passar cabo|passagem de cabo|fazer ponto|novo ponto|reforma eletrica|refiacao|visita tecnica|diagnostico|reparo|conserto)/.test(n);
+  if (labor) return "labor";
+
+  const material =
+    /(material|materiais|insumo|insumos|cabo|fio |metro do fio|metro do cabo|dr\b|dps\b|disjuntor|tomada|interruptor|eletroduto|conduite|quadro|barramento|haste|wago|conector|fita isolante)/.test(n);
+  if (material) return "material";
+
+  return "labor";
+}
+
 const requiredEnv = [
   "DATABASE_URL",
   "META_ACCESS_TOKEN",
@@ -376,13 +400,31 @@ async function processMessage(message) {
 
     const text = await messageToText(message);
     const previous = await history(hash);
-    const priceConversation = [...previous.filter(m=>m?.role==="user").map(m=>String(m.content||"")),text].join("\n");
-    const [pricingContext, materialContext] = await Promise.all([
-      buildLaborPricingContext(priceConversation),
-      buildMaterialPricingContext(priceConversation)
-    ]);
+    const intent = pricingIntent(text);
+    let pricingContext = "";
+    let materialContext = "";
+    if (intent === "labor") {
+      pricingContext = await buildLaborPricingContext(text);
+    } else if (intent === "material") {
+      materialContext = await buildMaterialPricingContext(text);
+    } else if (intent === "both") {
+      [pricingContext, materialContext] = await Promise.all([
+        buildLaborPricingContext(text),
+        buildMaterialPricingContext(text)
+      ]);
+    }
+
+    const routingContext = intent === "labor"
+      ? "INTENÇÃO DE PREÇO DETECTADA: MÃO DE OBRA. Responda SOMENTE o valor do serviço/mão de obra. Não informe preço de materiais."
+      : intent === "material"
+        ? "INTENÇÃO DE PREÇO DETECTADA: MATERIAL. Responda SOMENTE preço do produto/insumo solicitado. Não informe mão de obra."
+        : intent === "both"
+          ? "INTENÇÃO DE PREÇO DETECTADA: MÃO DE OBRA + MATERIAL. Responda em dois blocos separados, sem misturar os valores."
+          : "";
+
     const raw = await runAI([
       {role:"system",content:SYSTEM_PROMPT},
+      ...(routingContext ? [{role:"system",content:routingContext}] : []),
       ...(pricingContext ? [{role:"system",content:pricingContext}] : []),
       ...(materialContext ? [{role:"system",content:materialContext}] : []),
       ...previous,

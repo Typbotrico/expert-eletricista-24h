@@ -450,7 +450,7 @@ app.get("/diagnostics/meta-subscription",async (req,res)=>{
       headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"}
     });
     const data = await resp.json().catch(()=>({}));
-    res.status(resp.ok?200:502).json({
+    res.json({
       ok:resp.ok,
       action:method==="POST"?"subscribe":"status",
       http:resp.status,

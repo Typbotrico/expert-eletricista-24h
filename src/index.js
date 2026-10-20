@@ -2,6 +2,7 @@ import express from "express";
 import pg from "pg";
 import crypto from "node:crypto";
 import { SYSTEM_PROMPT } from "./expert-prompt.js";
+import { buildLaborPricingContext, initLaborPricingGeo, laborPricingStatus } from "./labor-pricing.js";
 
 const { Pool } = pg;
 const app = express();
@@ -376,7 +377,14 @@ async function processMessage(message) {
 
     const text = await messageToText(message);
     const previous = await history(hash);
-    const raw = await runAI([{role:"system",content:SYSTEM_PROMPT},...previous,{role:"user",content:text}]);
+    const priceConversation = [...previous.filter(m=>m?.role==="user").map(m=>String(m.content||"")),text].join("\n");
+    const pricingContext = await buildLaborPricingContext(priceConversation);
+    const raw = await runAI([
+      {role:"system",content:SYSTEM_PROMPT},
+      ...(pricingContext ? [{role:"system",content:pricingContext}] : []),
+      ...previous,
+      {role:"user",content:text}
+    ]);
     const answer = parseExpertAnswer(raw);
     if (!answer.answer) throw new Error("IA não retornou texto");
 
@@ -420,6 +428,7 @@ app.get("/health",async (_req,res)=>{
     daily_limit:null,
     live_whatsapp_tested:process.env.IS_PRODUCTION_VERIFIED==="true",
     accepts:{text:true,audio:true,image:true},
+    labor_pricing:laborPricingStatus(),
     missing
   });
 });
@@ -493,7 +502,12 @@ setInterval(()=>{
 
 const port = Number(process.env.PORT || 10000);
 initDb()
-  .then(()=>app.listen(port,"0.0.0.0",()=>console.log(`Expert Eletricista 24H na porta ${port}`)))
+  .then(()=>{
+    initLaborPricingGeo()
+      .then(()=>console.log("Base geográfica de preços carregada",laborPricingStatus()))
+      .catch(err=>console.error("Falha ao carregar preços geográficos:",err?.message));
+    app.listen(port,"0.0.0.0",()=>console.log(`Expert Eletricista 24H na porta ${port}`));
+  })
   .catch(err=>{
     console.error("Banco indisponível:",err?.message);
     app.listen(port,"0.0.0.0",()=>console.log(`Expert Eletricista 24H na porta ${port}`));

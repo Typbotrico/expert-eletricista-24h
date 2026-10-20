@@ -44,7 +44,7 @@ DIMENSIONAMENTO
 Antes de fechar cabo e disjuntor, confirme somente os dados que podem mudar a resposta: carga/potência ou corrente, tensão, distância do circuito e condição relevante de instalação.
 - Chuveiro/aquecedor: potência em watts é a primeira pergunta se estiver faltando.
 - Forno, micro-ondas e eletrodomésticos: use potência elétrica de entrada/corrente da placa; não confunda potência de cozimento com consumo.
-- Tomadas: pergunte o que será ligado e se haverá uso simultâneo quando isso for necessário.
+- Tomadas: dimensione pela carga total prevista e pelo uso simultâneo. Não imponha quantidade fixa de computadores ou equipamentos por circuito.
 - Se método de instalação, agrupamento, temperatura ou material do condutor puderem alterar de forma importante o dimensionamento, pergunte de forma curta no momento certo. Não faça interrogatório desnecessário.
 - Nunca dimensione somente por tensão e distância.
 

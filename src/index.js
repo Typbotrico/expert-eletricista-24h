@@ -3,6 +3,7 @@ import pg from "pg";
 import crypto from "node:crypto";
 import { SYSTEM_PROMPT } from "./expert-prompt.js";
 import { buildLaborPricingContext, initLaborPricingGeo, laborPricingStatus } from "./labor-pricing.js";
+import { buildMaterialPricingContext, initMaterialPricingGeo, materialPricingStatus } from "./material-pricing.js";
 
 const { Pool } = pg;
 const app = express();
@@ -378,10 +379,14 @@ async function processMessage(message) {
     const text = await messageToText(message);
     const previous = await history(hash);
     const priceConversation = [...previous.filter(m=>m?.role==="user").map(m=>String(m.content||"")),text].join("\n");
-    const pricingContext = await buildLaborPricingContext(priceConversation);
+    const [pricingContext, materialContext] = await Promise.all([
+      buildLaborPricingContext(priceConversation),
+      buildMaterialPricingContext(priceConversation)
+    ]);
     const raw = await runAI([
       {role:"system",content:SYSTEM_PROMPT},
       ...(pricingContext ? [{role:"system",content:pricingContext}] : []),
+      ...(materialContext ? [{role:"system",content:materialContext}] : []),
       ...previous,
       {role:"user",content:text}
     ]);
@@ -429,6 +434,7 @@ app.get("/health",async (_req,res)=>{
     live_whatsapp_tested:process.env.IS_PRODUCTION_VERIFIED==="true",
     accepts:{text:true,audio:true,image:true},
     labor_pricing:laborPricingStatus(),
+    material_pricing:materialPricingStatus(),
     missing
   });
 });
@@ -503,9 +509,9 @@ setInterval(()=>{
 const port = Number(process.env.PORT || 10000);
 initDb()
   .then(()=>{
-    initLaborPricingGeo()
-      .then(()=>console.log("Base geográfica de preços carregada",laborPricingStatus()))
-      .catch(err=>console.error("Falha ao carregar preços geográficos:",err?.message));
+    Promise.allSettled([initLaborPricingGeo(),initMaterialPricingGeo()])
+      .then(()=>console.log("Bases de preços carregadas",{labor:laborPricingStatus(),materials:materialPricingStatus()}))
+      .catch(()=>{});
     app.listen(port,"0.0.0.0",()=>console.log(`Expert Eletricista 24H na porta ${port}`));
   })
   .catch(err=>{

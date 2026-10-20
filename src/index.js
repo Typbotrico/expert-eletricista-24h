@@ -313,6 +313,7 @@ async function runAI(messages) {
 async function processMessage(message) {
   const phone = message?.from;
   if (!phoneOk(phone) || !message?.id) return;
+  console.log("Inbound WhatsApp:",message?.type || "unknown");
 
   const hash = phoneHash(phone);
   const idHash = sha256(`${process.env.USER_HASH_SECRET || process.env.META_APP_SECRET}:meta:${message.id}`);
@@ -398,6 +399,7 @@ async function processMessage(message) {
     await markPending(hash,answer.pending,decision);
     await saveHistory(hash,[...previous,{role:"user",content:text},{role:"assistant",content:answer.answer}]);
     await pool.query("UPDATE processed_messages SET status='sent' WHERE id_hash=$1",[idHash]);
+    console.log("WhatsApp reply sent");
   } catch (err) {
     console.error("Falha no processamento:",err?.message || "erro");
     if (!sent && chargeType) {
@@ -437,6 +439,32 @@ app.get("/health",async (_req,res)=>{
     material_pricing:materialPricingStatus(),
     missing
   });
+});
+
+app.get("/diagnostics/runtime",async (_req,res)=>{
+  try {
+    const month = new Date().toISOString().slice(0,7);
+    const [globalUsage, recent, subs] = await Promise.all([
+      pool.query("SELECT qty FROM usage_counters WHERE quota_key=$1",[`ai:${month}`]),
+      pool.query("SELECT status,COUNT(*)::int AS qty,MAX(created_at) AS latest FROM processed_messages WHERE created_at>NOW()-INTERVAL '2 hours' GROUP BY status ORDER BY status"),
+      pool.query("SELECT status,questions_used,question_limit,period_end FROM subscribers ORDER BY updated_at DESC LIMIT 5")
+    ]);
+    res.json({
+      month,
+      global_ai_used:Number(globalUsage.rows[0]?.qty || 0),
+      global_ai_limit:Number(process.env.MAX_GLOBAL_AI_ANSWERS_MONTH || SETTINGS.defaultGlobalAiRepliesMonth),
+      daily_limit:null,
+      recent_messages:recent.rows,
+      subscribers:subs.rows.map(s=>({
+        status:s.status,
+        used:s.questions_used,
+        limit:s.question_limit,
+        period_end:s.period_end
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({error:String(err?.message || "erro").slice(0,160)});
+  }
 });
 
 app.get("/webhook",(req,res)=>{

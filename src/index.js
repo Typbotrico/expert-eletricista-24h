@@ -2,8 +2,8 @@ import express from "express";
 import pg from "pg";
 import crypto from "node:crypto";
 import { SYSTEM_PROMPT } from "./expert-prompt.js";
-import { buildLaborPricingContext, initLaborPricingGeo, laborPricingStatus } from "./labor-pricing.js";
-import { buildMaterialPricingContext, initMaterialPricingGeo, materialPricingStatus } from "./material-pricing.js";
+import { buildLaborPricingContext, buildLaborDirectReply, initLaborPricingGeo, laborPricingStatus } from "./labor-pricing.js";
+import { buildMaterialPricingContext, buildMaterialDirectReply, initMaterialPricingGeo, materialPricingStatus } from "./material-pricing.js";
 
 const { Pool } = pg;
 const app = express();
@@ -401,6 +401,37 @@ async function processMessage(message) {
     const text = await messageToText(message);
     const previous = await history(hash);
     const intent = pricingIntent(text);
+
+    if (intent === "labor") {
+      const direct = await buildLaborDirectReply(text);
+      if (direct) {
+        const answer = parseExpertAnswer(direct);
+        if (globalCounter) { await releaseCounter(globalCounter); globalCounter = null; }
+        await sendWhatsApp(phone,answer.answer);
+        sent = true;
+        await markPending(hash,answer.pending,decision);
+        await saveHistory(hash,[...previous,{role:"user",content:text},{role:"assistant",content:answer.answer}]);
+        await pool.query("UPDATE processed_messages SET status='sent_labor_direct' WHERE id_hash=$1",[idHash]);
+        console.log("Direct labor quote sent");
+        return;
+      }
+    }
+
+    if (intent === "material") {
+      const direct = await buildMaterialDirectReply(text);
+      if (direct) {
+        const answer = parseExpertAnswer(direct);
+        if (globalCounter) { await releaseCounter(globalCounter); globalCounter = null; }
+        await sendWhatsApp(phone,answer.answer);
+        sent = true;
+        await markPending(hash,answer.pending,decision);
+        await saveHistory(hash,[...previous,{role:"user",content:text},{role:"assistant",content:answer.answer}]);
+        await pool.query("UPDATE processed_messages SET status='sent_material_direct' WHERE id_hash=$1",[idHash]);
+        console.log("Direct material quote sent");
+        return;
+      }
+    }
+
     let pricingContext = "";
     let materialContext = "";
     if (intent === "labor") {

@@ -521,7 +521,7 @@ async function processMessage(message) {
     const currentIntent = technicalIntent ? "none" : pricingIntent(text);
     const intent = currentIntent === "none" && !technicalIntent ? followUpPricingIntent(text,previous) : currentIntent;
     console.log("Intent routing:", {technicalIntent,currentIntent,intent});
-    const recentUserContext = previous.filter(m=>m?.role==="user").slice(-2).map(m=>String(m.content||""));
+    const recentUserContext = previous.filter(m=>m?.role==="user").map(m=>String(m.content||""));
     const pricingQuery = [...recentUserContext,text].join("\n");
 
     if (intent === "labor") {

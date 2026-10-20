@@ -608,7 +608,7 @@ async function processMessage(message) {
     ) ? [] : previous;
 
     const technicalRoutingContext = technicalIntent
-      ? "MODO TÉCNICO ATIVO. Esta pergunta NÃO é orçamento. Não pergunte cidade/UF, não fale preço e não peça qual serviço quer orçar. Responda diretamente a dúvida elétrica de forma simples e prática. Quando couber, explique: para que serve, como identificar, passo a passo, como conferir/testar e o erro comum a evitar."
+      ? "MODO TÉCNICO ATIVO. Esta pergunta NÃO é orçamento. Não pergunte cidade/UF, não fale preço e não peça qual serviço quer orçar. Responda diretamente a dúvida elétrica de forma simples e prática. Para circuitos de tomadas e computadores, evite regras rígidas pela quantidade de aparelhos: considere a demanda total prevista do circuito e explique que várias tomadas podem pertencer ao mesmo circuito quando o dimensionamento for compatível. Diferencie também ligação elétrica em paralelo de simples continuidade física do cabo entre caixas. Quando couber, explique para que serve, como identificar, como conferir/testar e o erro comum a evitar."
       : "";
 
     const raw = await runAI([

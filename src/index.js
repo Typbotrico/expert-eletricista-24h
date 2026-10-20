@@ -542,12 +542,27 @@ async function processMessage(message) {
           ? "INTENÇÃO DE PREÇO DETECTADA: MÃO DE OBRA + MATERIAL. Responda em dois blocos separados, sem misturar os valores."
           : "";
 
+    const lastAssistantText = normalizeIntent([...previous].reverse().find(m=>m?.role==="assistant")?.content || "");
+    const previousForAI = technicalIntent && (
+      lastAssistantText.startsWith("mao de obra") ||
+      lastAssistantText.startsWith("material") ||
+      lastAssistantText.includes("qual cidade e uf") ||
+      lastAssistantText.includes("qual cidade do servico") ||
+      lastAssistantText.includes("qual material voce quer cotar") ||
+      lastAssistantText.includes("qual servico voce quer orcar")
+    ) ? [] : previous;
+
+    const technicalRoutingContext = technicalIntent
+      ? "MODO TÉCNICO ATIVO. Esta pergunta NÃO é orçamento. Não pergunte cidade/UF, não fale preço e não peça qual serviço quer orçar. Responda diretamente a dúvida elétrica de forma simples e prática. Quando couber, explique: para que serve, como identificar, passo a passo, como conferir/testar e o erro comum a evitar."
+      : "";
+
     const raw = await runAI([
       {role:"system",content:SYSTEM_PROMPT},
+      ...(technicalRoutingContext ? [{role:"system",content:technicalRoutingContext}] : []),
       ...(routingContext ? [{role:"system",content:routingContext}] : []),
       ...(pricingContext ? [{role:"system",content:pricingContext}] : []),
       ...(materialContext ? [{role:"system",content:materialContext}] : []),
-      ...previous,
+      ...previousForAI,
       {role:"user",content:text}
     ]);
     const answer = parseExpertAnswer(raw);

@@ -9,6 +9,10 @@ app.disable("x-powered-by");
 
 const SETTINGS = Object.freeze({
   model: "@cf/zai-org/glm-4.7-flash",
+  audioModel: "@cf/openai/whisper-large-v3-turbo",
+  visionModel: "@cf/google/gemma-4-26b-a4b-it",
+  maxAudioBytes: 16 * 1024 * 1024,
+  maxImageBytes: 8 * 1024 * 1024,
   monthlyQuestions: 150,
   periodDays: 30,
   maxCharsIn: 1200,
@@ -153,12 +157,121 @@ async function markPending(hash,pending,chargeType) {
   }
 }
 
+const graphVersion = () => /^v\d+\.\d+$/.test(process.env.GRAPH_API_VERSION || "") ? process.env.GRAPH_API_VERSION : "v26.0";
+
+async function fetchWhatsAppMedia(mediaId,maxBytes) {
+  const token = process.env.META_ACCESS_TOKEN;
+  if (!token || !mediaId) throw new Error("Mídia Meta indisponível");
+
+  const metaResp = await fetch(`https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(mediaId)}`,{
+    headers:{Authorization:`Bearer ${token}`}
+  });
+  const meta = await metaResp.json().catch(()=>({}));
+  if (!metaResp.ok || !meta?.url) throw new Error(`Meta mídia HTTP ${metaResp.status}`);
+  if (Number(meta.file_size || 0) > maxBytes) throw new Error("Mídia acima do limite");
+
+  const mediaResp = await fetch(meta.url,{headers:{Authorization:`Bearer ${token}`}});
+  if (!mediaResp.ok) throw new Error(`Download mídia HTTP ${mediaResp.status}`);
+  const buffer = Buffer.from(await mediaResp.arrayBuffer());
+  if (!buffer.length || buffer.length > maxBytes) throw new Error("Tamanho de mídia inválido");
+
+  return {
+    buffer,
+    mimeType:String(meta.mime_type || mediaResp.headers.get("content-type") || "application/octet-stream").split(";")[0]
+  };
+}
+
+async function transcribeAudio(buffer) {
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_AI_TOKEN;
+  const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${SETTINGS.audioModel}`,{
+    method:"POST",
+    headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+    body:JSON.stringify({
+      audio:buffer.toString("base64"),
+      task:"transcribe",
+      language:"pt",
+      vad_filter:true,
+      condition_on_previous_text:false,
+      initial_prompt:"Dúvida técnica de eletricista brasileiro sobre instalação elétrica residencial ou predial."
+    })
+  });
+  const data = await resp.json().catch(()=>({}));
+  if (!resp.ok || data?.success === false) throw new Error(`Transcrição HTTP ${resp.status}`);
+  const text =
+    data?.result?.text ??
+    data?.result?.transcription_info?.text ??
+    data?.transcription_info?.text ??
+    data?.text;
+  if (typeof text !== "string" || !text.trim()) throw new Error("Áudio sem transcrição");
+  return text.trim().slice(0,SETTINGS.maxCharsIn);
+}
+
+async function inspectImage(buffer,mimeType,caption) {
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_AI_TOKEN;
+  const dataUrl = `data:${mimeType.startsWith("image/") ? mimeType : "image/jpeg"};base64,${buffer.toString("base64")}`;
+  const prompt = [
+    "Analise esta foto para auxiliar um eletricista brasileiro.",
+    "Descreva de forma técnica e curta SOMENTE o que estiver visível.",
+    "Leia etiquetas e valores quando estiverem legíveis; identifique componentes, sinais de aquecimento, dano, improviso ou risco aparente.",
+    "Não invente tensão, corrente, bitola, estado interno ou conformidade que a foto não permita confirmar.",
+    caption ? `Pergunta/legenda do usuário: ${caption}` : "O usuário não enviou legenda."
+  ].join("\n");
+
+  const resp = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${SETTINGS.visionModel}`,{
+    method:"POST",
+    headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
+    body:JSON.stringify({
+      messages:[
+        {role:"system",content:"Você faz inspeção visual auxiliar de instalações elétricas. Seja factual e conciso."},
+        {role:"user",content:prompt}
+      ],
+      image:dataUrl,
+      temperature:0.1,
+      max_completion_tokens:500,
+      chat_template_kwargs:{enable_thinking:false}
+    })
+  });
+  const data = await resp.json().catch(()=>({}));
+  if (!resp.ok || data?.success === false) throw new Error(`Visão HTTP ${resp.status}`);
+  const text =
+    data?.result?.response ??
+    data?.response ??
+    data?.result?.choices?.[0]?.message?.content ??
+    data?.choices?.[0]?.message?.content;
+  if (typeof text !== "string" || !text.trim()) throw new Error("Imagem sem análise");
+  return text.trim().slice(0,900);
+}
+
+async function messageToText(message) {
+  if (message?.type === "text") {
+    const text = String(message?.text?.body || "").trim().slice(0,SETTINGS.maxCharsIn);
+    if (!text) throw new Error("Texto vazio");
+    return text;
+  }
+
+  if (message?.type === "audio") {
+    const media = await fetchWhatsAppMedia(message?.audio?.id,SETTINGS.maxAudioBytes);
+    const transcript = await transcribeAudio(media.buffer);
+    return `[Áudio transcrito]\n${transcript}`.slice(0,SETTINGS.maxCharsIn);
+  }
+
+  if (message?.type === "image") {
+    const caption = String(message?.image?.caption || "").trim().slice(0,400);
+    const media = await fetchWhatsAppMedia(message?.image?.id,SETTINGS.maxImageBytes);
+    const visual = await inspectImage(media.buffer,media.mimeType,caption);
+    return `[Foto enviada pelo usuário]${caption ? `\nPergunta/legenda: ${caption}` : ""}\nAnálise visual: ${visual}`.slice(0,SETTINGS.maxCharsIn);
+  }
+
+  throw new Error("Formato não suportado");
+}
+
 async function sendWhatsApp(phone,content) {
   const token = process.env.META_ACCESS_TOKEN;
   const id = process.env.WHATSAPP_PHONE_NUMBER_ID;
   if (!token || !id) throw new Error("Configuração Meta ausente");
-  const version = /^v\d+\.\d+$/.test(process.env.GRAPH_API_VERSION || "") ? process.env.GRAPH_API_VERSION : "v26.0";
-  const resp = await fetch(`https://graph.facebook.com/${version}/${id}/messages`,{
+  const resp = await fetch(`https://graph.facebook.com/${graphVersion()}/${id}/messages`,{
     method:"POST",
     headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},
     body:JSON.stringify({
@@ -235,10 +348,9 @@ async function processMessage(message) {
       return;
     }
 
-    const text = String(message?.text?.body || "").trim().slice(0,SETTINGS.maxCharsIn);
-    if (message.type !== "text" || !text) {
+    if (!["text","audio","image"].includes(message?.type)) {
       if (await claimCounter(`notice:format:${today}:${hash}`,1)) {
-        await sendWhatsApp(phone,"Por enquanto, envie sua dúvida por texto. Fotos e áudios ainda não são interpretados.");
+        await sendWhatsApp(phone,"Envie sua dúvida por texto, áudio ou foto. Outros formatos ainda não são interpretados.");
         sent = true;
       }
       await pool.query("UPDATE processed_messages SET status='finished' WHERE id_hash=$1",[idHash]);
@@ -262,6 +374,7 @@ async function processMessage(message) {
       return;
     }
 
+    const text = await messageToText(message);
     const previous = await history(hash);
     const raw = await runAI([{role:"system",content:SYSTEM_PROMPT},...previous,{role:"user",content:text}]);
     const answer = parseExpertAnswer(raw);
@@ -277,6 +390,12 @@ async function processMessage(message) {
     if (!sent && chargeType) {
       await refundSubscriber(hash,chargeType);
       if (globalCounter) await releaseCounter(globalCounter);
+      const fallback = message?.type === "audio"
+        ? "Não consegui interpretar esse áudio. Reenvie o áudio ou mande a dúvida por texto; seu saldo não foi descontado."
+        : message?.type === "image"
+          ? "Não consegui analisar essa foto. Reenvie uma imagem mais nítida ou mande a dúvida por texto; seu saldo não foi descontado."
+          : "Não consegui processar sua pergunta agora. Seu saldo não foi descontado; tente novamente.";
+      await sendWhatsApp(phone,fallback).catch(()=>{});
     }
     await pool.query("UPDATE processed_messages SET status=$1 WHERE id_hash=$2",[sent?"sent_with_storage_error":"failed",idHash]).catch(()=>{});
   }
@@ -300,6 +419,7 @@ app.get("/health",async (_req,res)=>{
     period_days:30,
     daily_limit:null,
     live_whatsapp_tested:process.env.IS_PRODUCTION_VERIFIED==="true",
+    accepts:{text:true,audio:true,image:true},
     missing
   });
 });

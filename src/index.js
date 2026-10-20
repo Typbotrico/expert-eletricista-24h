@@ -48,13 +48,21 @@ function pricingIntent(text) {
   return "labor";
 }
 
+function isTechnicalElectricalQuestion(text) {
+  const n = normalizeIntent(text);
+  const price = /(quanto custa|quanto fica|quanto cobrar|preco|valor|orcamento|mao de obra|material incluso)/.test(n);
+  if (price) return false;
+  const electrical = /(dr\b|idr\b|dps\b|disjuntor|quadro|barramento|aterramento|terra\b|condutor pe|\bpe\b|\bpen\b|neutro|fase|tensao|corrente|potencia|cabo|fio\b|bitola|tomada|interruptor|chuveiro|circuito|borne|entrada|saida|ligacao|diagrama|esquema)/.test(n);
+  const question = /(como|qual|quais|onde|por que|porque|o que|pra que|para que|serve|funciona|ligar|instalar|trocar|testar|medir|identificar|dimensionar|calcular|entrada|saida|borne|passo a passo|esquema|diagrama|posso|devo)/.test(n);
+  return electrical && question;
+}
+
 function followUpPricingIntent(text,previous) {
   const n = normalizeIntent(text);
+  if (isTechnicalElectricalQuestion(text)) return "none";
 
-  // Pergunta técnica nova SEMPRE sai do modo orçamento, mesmo que a conversa anterior fosse de preço.
-  const technicalQuestion =
-    /(como faco|como fazer|como instalar|como ligar|como trocar|como substituir|como testar|como medir|como identificar|como dimensionar|como funciona|onde ligar|qual borne|qual fio|qual cabo|qual disjuntor|qual bitola|o que e|por que|porque|posso ligar|devo ligar|diagrama|esquema|passo a passo)/.test(n);
-  if (technicalQuestion) return "none";
+  // Só respostas curtas podem continuar um orçamento anterior.
+  if (n.length > 90 || String(text || "").includes("?")) return "none";
 
   const lastAssistant = [...previous].reverse().find(m=>m?.role==="assistant");
   const a = normalizeIntent(lastAssistant?.content || "");

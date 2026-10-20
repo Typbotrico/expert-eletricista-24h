@@ -708,6 +708,16 @@ app.get("/health",async (_req,res)=>{
   });
 });
 
+// Rotas operacionais privadas: nunca expor tokens, diagnóstico ou ações Meta publicamente.
+app.use("/diagnostics",(req,res,next)=>{
+  const key = process.env.ADMIN_API_KEY || "";
+  if (key.length < 24) return res.status(503).json({error:"Diagnósticos administrativos indisponíveis"});
+  if (!safeEqual(req.headers.authorization || "", `Bearer ${key}`)) {
+    return res.status(401).json({error:"Não autorizado"});
+  }
+  next();
+});
+
 app.get("/diagnostics/meta-access",async (_req,res)=>{
   try {
     const token = process.env.META_ACCESS_TOKEN;

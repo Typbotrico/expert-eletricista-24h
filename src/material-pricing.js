@@ -263,6 +263,39 @@ export async function buildMaterialPricingContext(conversationText) {
   return lines.join("\n");
 }
 
+export async function buildMaterialDirectReply(text) {
+  if (!municipalities.length) {
+    try { await initMaterialPricingGeo(); } catch {}
+  }
+
+  const city = detectCity(text);
+  const uf = city?.uf || stateFromText(text);
+  if (!city && !uf) return "Qual cidade e UF? [[AGUARDANDO_DADOS]]";
+
+  const items = findMaterials(text);
+  if (!items.length) return "Qual material você quer cotar? [[AGUARDANDO_DADOS]]";
+
+  const factor = materialLocationFactor(city,uf);
+  const loc = city ? city.city : uf;
+  const lines = [];
+
+  for (const item of items.slice(0,3)) {
+    const min = item.min*factor;
+    const max = item.max*factor;
+    const rec = item.rec*factor;
+    const qty = lengthQty(text,item);
+
+    if (qty && qty>0) {
+      lines.push(`${item.label}: ${fmt(min)} a ${fmt(max)} por ${item.unit}.`);
+      lines.push(`${qty} ${item.unit}: ${fmt(min*qty)} a ${fmt(max*qty)}. Referência: ~${fmt(rec*qty)}.`);
+    } else {
+      lines.push(`${item.label} em ${loc}: ${fmt(min)} a ${fmt(max)} por ${item.unit}. Referência: ~${fmt(rec)}.`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 export function materialPricingStatus() {
   return {
     reference:"2026-10",

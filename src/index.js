@@ -344,30 +344,27 @@ async function processMessage(message) {
       const msg = decision === "inactive"
         ? "Seu acesso ao Expert Eletricista 24H não está ativo. Consulte a assinatura com o responsável pelo serviço."
         : "Você já usou suas 150 perguntas deste período. Sua franquia renova após a confirmação da próxima mensalidade.";
-      if (await claimCounter(`notice:${decision}:${today}:${hash}`,1)) {
-        await sendWhatsApp(phone,msg); sent = true;
-      }
-      await pool.query("UPDATE processed_messages SET status='finished' WHERE id_hash=$1",[idHash]);
+      await sendWhatsApp(phone,msg); sent = true;
+      await pool.query("UPDATE processed_messages SET status=$1 WHERE id_hash=$2",[`finished_${decision}`,idHash]);
+      console.log("Message finished:",decision);
       return;
     }
 
     if (!["text","audio","image"].includes(message?.type)) {
-      if (await claimCounter(`notice:format:${today}:${hash}`,1)) {
-        await sendWhatsApp(phone,"Envie sua dúvida por texto, áudio ou foto. Outros formatos ainda não são interpretados.");
-        sent = true;
-      }
-      await pool.query("UPDATE processed_messages SET status='finished' WHERE id_hash=$1",[idHash]);
+      await sendWhatsApp(phone,"Envie sua dúvida por texto, áudio ou foto. Outros formatos ainda não são interpretados.");
+      sent = true;
+      await pool.query("UPDATE processed_messages SET status='finished_unsupported' WHERE id_hash=$1",[idHash]);
+      console.log("Message finished: unsupported",message?.type || "unknown");
       return;
     }
 
     globalCounter = `ai:${month}`;
     const maxGlobal = Number(process.env.MAX_GLOBAL_AI_ANSWERS_MONTH || SETTINGS.defaultGlobalAiRepliesMonth);
     if (!await claimCounter(globalCounter,maxGlobal)) {
-      if (await claimCounter(`notice:global:${today}:${hash}`,1)) {
-        await sendWhatsApp(phone,"O Expert está temporariamente indisponível. Seu saldo não foi descontado; tente mais tarde.");
-        sent = true;
-      }
-      await pool.query("UPDATE processed_messages SET status='finished' WHERE id_hash=$1",[idHash]);
+      await sendWhatsApp(phone,"O Expert está temporariamente indisponível. Seu saldo não foi descontado; tente mais tarde.");
+      sent = true;
+      await pool.query("UPDATE processed_messages SET status='finished_global_limit' WHERE id_hash=$1",[idHash]);
+      console.log("Message finished: global limit");
       return;
     }
 

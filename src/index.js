@@ -196,9 +196,22 @@ async function processMessage(message) {
   const inserted = await pool.query("INSERT INTO processed_messages(id_hash,status) VALUES($1,'received') ON CONFLICT(id_hash) DO NOTHING RETURNING id_hash",[idHash]);
   if (inserted.rowCount !== 1) return;
 
-  const subscriber = await userState(hash);
+  let subscriber = await userState(hash);
   let chargeType = null, globalCounter = null, sent = false;
   try {
+    if (!subscriber && process.env.PILOT_AUTO_ACTIVATE_FIRST_USER === "true") {
+      const start = new Date();
+      const end = new Date(start.getTime()+SETTINGS.periodDays*86400000);
+      const auto = await pool.query(
+        "INSERT INTO subscribers(user_hash,status,period_start,period_end,question_limit,questions_used,pending_until,clarification_left) SELECT $1,'active',$2,$3,$4,0,NULL,0 WHERE NOT EXISTS (SELECT 1 FROM subscribers) ON CONFLICT(user_hash) DO NOTHING RETURNING user_hash",
+        [hash,start,end,SETTINGS.monthlyQuestions]
+      );
+      if (auto.rowCount === 1) {
+        console.log("Pilot test user auto-activated");
+        subscriber = await userState(hash);
+      }
+    }
+
     const decision = chooseCharge(subscriber);
     const today = new Date().toISOString().slice(0,10);
     const month = new Date().toISOString().slice(0,7);

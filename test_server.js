@@ -1,34 +1,43 @@
-'use strict';
-const assert=require('node:assert/strict');
-const {test}=require('node:test');
-process.env.CENTRAL_API_TOKEN='x'.repeat(40);
-const {server,parseBackup}=require('./server');
-const data={selected:'test',campaigns:[{id:'demo',name:'Demo',contacts:Array.from({length:8},(_,i)=>({id:'demo-'+i,phone:'552400000000'+i,status:'Pendente',demo:true,note:'Dado fictício'}))},{id:'test',name:'Teste autorizado',contacts:[{id:'only',name:'Teste',phone:'5524999999999',status:'Pendente'}]}]};
-test('Filtro conserva campanha real sem discar ficticios',()=>{
- const p=parseBackup(data);
- assert.equal(p.campaigns.length,2);
- assert.equal(p.campaigns[0].contacts.filter(c=>c.eligible).length,0);
- assert.equal(p.campaigns[1].contacts.filter(c=>c.eligible).length,1);
- assert.equal(p.campaigns[0].contacts.filter(c=>c.fictitious).length,8);
-});
-test('Servidor protegido e bloqueio de chamadas externas', async()=>{
- await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
- const port=server.address().port,api='http://127.0.0.1:'+port, auth={Authorization:'Bearer '+'x'.repeat(40)};
- try {
-  let r=await fetch(api+'/health');let body=await r.json();assert.equal(body.external_calls_enabled,false);
-  r=await fetch(api+'/');assert.equal(r.status,200);
-  let html=await r.text();assert.ok(html.includes('Monitor de operação'));assert.ok(html.includes('Somente leitura')||html.includes('somente leitura'));
-  assert.equal(html.includes('5524999999999'),false);
-  r=await fetch(api+'/api/public/status');assert.equal(r.status,200);
-  let summary=await r.json();assert.equal(summary.external_calls_enabled,false);
-  assert.equal(summary.site_original_integrated,false);assert.equal('phone' in summary,false);
-  assert.equal(JSON.stringify(summary).includes('5524999999999'),false);
-  r=await fetch(api+'/api/campaigns');assert.equal(r.status,401);
-  r=await fetch(api+'/api/campaigns',{headers:auth});assert.equal(r.status,200);
-  r=await fetch(api+'/api/campaign/start',{method:'POST',headers:auth});assert.equal(r.status,423);
-  r=await fetch(api+'/api/pilot/internal-test',{method:'POST',headers:auth}); assert.equal(r.status,202);
-  let b=await r.json();let jobId=b.jobId;
-  r=await fetch(api+'/api/agent/poll',{headers:auth});b=await r.json();assert.equal(b.job.channel,'PJSIP/1001');assert.equal(b.job.exten,'600');
-  r=await fetch(api+'/api/agent/report',{method:'POST',headers:{...auth,'Content-Type':'application/json'},body:JSON.stringify({id:jobId,outcome:'accepted',detail:'AMI response success'})});assert.equal(r.status,200);
- } finally {await new Promise(resolve=>server.close(resolve))}
-});
+const test=require('node:test'),assert=require('node:assert/strict');
+const {createMotor}=require('./server.js');
+const adminToken='a'.repeat(64),agentToken='b'.repeat(64);
+const fixture={selected:'demo',globalBlock:[],campaigns:[{id:'demo',name:'Homologação',contacts:[{id:'x',name:'Exemplo',phone:'5524000000000',status:'Pendente',demo:true}],history:[{at:'2026-10-28T00:00:00Z',text:'Simulação antiga'}],block:[],agents:1,lines:1,start:'09:00',end:'18:00'}]};
+function memory(){let saved=null;return {kind:'test',async load(){return structuredClone(saved)},async save(s){saved=structuredClone(s)},get saved(){return saved}}}
+async function start(store=memory(),clock={value:1000000}){const m=createMotor({adminToken,agentToken,store,backup:fixture,now:()=>clock.value});await m.init();await new Promise(r=>m.server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+m.server.address().port;const request=async(path,role,method='GET',body,key)=>{const r=await fetch(base+path,{method,headers:{...(role?{Authorization:'Bearer '+(role==='admin'?adminToken:role==='agent'?agentToken:role)}:{}),...(key?{'Idempotency-Key':key}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()}};return {m,store,clock,request,close:()=>new Promise(r=>m.server.close(r))}}
+test('separate scopes, legacy token rejected, public status omits contacts, external calls always blocked',async()=>{const x=await start();try{
+ assert.equal((await x.request('/api/campaigns')).status,401);
+ assert.equal((await x.request('/api/campaigns','agent')).status,403);
+ assert.equal((await x.request('/api/agent/poll','admin')).status,403);
+ assert.equal((await x.request('/api/campaigns','old-token')).status,401);
+ assert.equal((await x.request('/api/campaign/start','admin','POST')).status,423);
+ const p=await x.request('/api/public/status');assert.equal(p.body.totals.fictitious_blocked,1);assert.equal(p.body.external_calls_enabled,false);assert(!JSON.stringify(p.body).includes('5524'));
+ assert.equal(x.store.saved.backup.campaigns[0].history[0].text,'Simulação antiga');
+}finally{await x.close()}});
+test('offline agent rejects test; idempotency, lease, non-answered result and restart durability',async()=>{const x=await start();try{
+ const key='unique-test-1234567890';assert.equal((await x.request('/api/pilot/internal-test','admin','POST',null,key)).status,503);
+ await x.request('/api/agent/poll','agent');
+ const one=await x.request('/api/pilot/internal-test','admin','POST',null,key);assert.equal(one.status,202);
+ const repeat=await x.request('/api/pilot/internal-test','admin','POST',null,key);assert.equal(repeat.body.jobId,one.body.jobId);assert.equal(x.store.saved.queue.length,1);
+ const job=(await x.request('/api/agent/poll','agent')).body.job;
+ assert.equal((await x.request('/api/agent/report','agent','POST',{id:job.id,lease:'wrong',outcome:'answered'})).status,409);
+ assert.equal((await x.request('/api/agent/report','agent','POST',{id:job.id,lease:job.lease,outcome:'accepted'})).status,200);
+ assert.equal((await x.request('/api/agent/report','agent','POST',{id:job.id,lease:job.lease,outcome:'answered'})).status,409);
+ assert.equal(x.store.saved.lastAgentResult.outcome,'accepted');assert.match(x.store.saved.lastAgentResult.meaning,/não comprova/);
+ await x.close();const y=await start(x.store,x.clock);try{assert.equal(y.m.status().totals.internal_test_jobs_completed,1);assert.equal(y.m.status().agent_connected,false);assert.equal((await y.request('/api/agent/poll','agent')).body.job,null)}finally{await y.close()}
+}finally{if(x.m.server.listening)await x.close()}});
+test('restart never redials a leased job and pause survives a restart',async()=>{const x=await start();try{
+ await x.request('/api/agent/poll','agent');await x.request('/api/pilot/internal-test','admin','POST',null,'unique-test-1234567890');await x.request('/api/agent/poll','agent');
+ assert.equal((await x.request('/api/campaign/pause','admin','POST',{campaignId:'demo'})).status,200);
+ await x.close();const y=await start(x.store,x.clock);try{assert.equal(y.store.saved.queue[0].state,'unknown');assert.equal(y.store.saved.campaignControl.demo.mode,'paused');assert.equal((await y.request('/api/agent/poll','agent')).body.job,null)}finally{await y.close()}
+}finally{if(x.m.server.listening)await x.close()}});
+test('database failure closes writes without claiming queue acceptance',async()=>{const store=memory(),x=await start(store);try{await x.request('/api/agent/poll','agent');store.save=async()=>{throw Error('DB offline')};assert.equal((await x.request('/api/pilot/internal-test','admin','POST',null,'unique-test-1234567890')).status,503);assert.equal(x.m.status().ready,false);assert.equal(store.saved.queue.length,0)}finally{await x.close()}});
+test('pairing is private, one-use and expires without leaking credential in audit',async()=>{const x=await start();try{
+ assert.equal((await x.request('/api/admin/pair','agent','POST')).status,403);
+ const pair=await x.request('/api/admin/pair','admin','POST');assert.equal(pair.status,201);assert.equal(pair.body.code.length,64);
+ assert(!JSON.stringify(x.store.saved).includes(pair.body.code));
+ const enrolled=await x.request('/api/agent/enroll',null,'POST',{code:pair.body.code});assert.equal(enrolled.status,200);assert.equal(enrolled.body.agentToken,agentToken);
+ assert.equal((await x.request('/api/agent/enroll',null,'POST',{code:pair.body.code})).status,401);
+ const next=await x.request('/api/admin/pair','admin','POST');x.clock.value+=600001;
+ assert.equal((await x.request('/api/agent/enroll',null,'POST',{code:next.body.code})).status,401);
+ assert(!JSON.stringify((await x.request('/api/audit','admin')).body).includes(agentToken));
+}finally{await x.close()}});

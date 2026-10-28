@@ -1,110 +1,212 @@
 #!/usr/bin/env python3
-"""Agente WSL da Central — ONLY ramal PJSIP/1001 -> eco 600 (no PSTN)."""
-import hmac
+"""Fixed-route internal pilot agent. No PSTN numbers or inbound listener."""
+import argparse
+import fcntl
+import getpass
 import json
-import logging
 import os
 from pathlib import Path
+import re
 import socket
 import time
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+import urllib.error
+import urllib.request
+import uuid
 
-ENDPOINT = os.getenv('CENTRAL_MOTOR_ENDPOINT', 'https://central-ligacoes-motor-piloto.onrender.com').rstrip('/')
-AMI_SECRET_PATH = Path('/etc/central-ami-bridge/ami.secret')
-MOTOR_TOKEN_PATH = Path('/etc/central-motor-agent/token')
-LOG = logging.getLogger('central-motor-agent')
-
-
-def receive_block(s):
-    buf = b''
-    while b'\r\n\r\n' not in buf and len(buf) < 16384:
-        part = s.recv(4096)
-        if not part:
-            break
-        buf += part
-    return buf.decode('utf-8', 'replace')
+ENDPOINT = 'https://central-ligacoes-motor-piloto.onrender.com'
+CONFIG = Path('/etc/central-motor-agent')
+STATE = Path('/var/lib/central-motor-agent/journal.json')
 
 
-def originate_internal_only():
-    secret = AMI_SECRET_PATH.read_text('utf-8').strip()
-    if not secret:
-        raise RuntimeError('Credencial AMI ausente')
-    with socket.create_connection(('127.0.0.1', 5038), timeout=7) as s:
-        s.settimeout(7)
-        intro = b''
-        while b'\n' not in intro and len(intro) < 4096:
-            part = s.recv(512)
+def atomic(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp')
+    with open(tmp, 'w', encoding='utf8') as out:
+        os.chmod(tmp, 0o600)
+        json.dump(value, out)
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(tmp, path)
+    fd = os.open(path.parent, os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def api(path, token=None, payload=None):
+    headers = {'Content-Type': 'application/json'}
+    if token:
+        headers['Authorization'] = 'Bearer ' + token
+    request = urllib.request.Request(ENDPOINT + path,
+        data=json.dumps(payload).encode() if payload is not None else None,
+        headers=headers)
+    with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
+        return json.load(response)
+
+
+class AMI:
+    def __init__(self, connection):
+        self.connection = connection
+        self.buffer = b''
+
+    def send(self, values):
+        if any('\r' in str(v) or '\n' in str(v) for v in values.values()):
+            raise ValueError('AMI field rejected')
+        self.connection.sendall(('\r\n'.join(f'{k}: {v}' for k, v in values.items()) + '\r\n\r\n').encode())
+
+    def read(self):
+        while b'\r\n\r\n' not in self.buffer:
+            part = self.connection.recv(65536)
             if not part:
-                raise RuntimeError('AMI desconectou antes do login')
-            intro += part
-        s.sendall(('Action: Login\r\nUsername: central_piloto\r\nSecret: ' + secret + '\r\nEvents: off\r\n\r\n').encode())
-        r = receive_block(s)
-        if 'Response: Success' not in r:
-            raise RuntimeError('AMI recusou login')
-        # Fixed route. No untrusted number from remote network is ever dialed.
-        msg = ('Action: Originate\r\n'
-               'ActionID: central-motor-interno\r\n'
-               'Channel: PJSIP/1001\r\n'
-               'Context: central-interna\r\n'
-               'Exten: 600\r\n'
-               'Priority: 1\r\n'
-               'Timeout: 20000\r\n'
-               'Async: true\r\n\r\n')
-        s.sendall(msg.encode())
-        r = receive_block(s)
-        if 'Response: Success' not in r:
-            raise RuntimeError('AMI recusou Originate')
-        return 'AMI aceitou Originate; atendimento ainda não confirmado'
+                raise ConnectionError('AMI disconnected')
+            self.buffer += part
+            if len(self.buffer) > 262144:
+                raise ValueError('AMI frame limit')
+        frame, self.buffer = self.buffer.split(b'\r\n\r\n', 1)
+        fields = {}
+        for line in frame.decode('utf8', errors='replace').split('\r\n'):
+            if ': ' in line:
+                key, value = line.split(': ', 1)
+                fields[key] = value
+        return fields
+
+    def login(self, secret):
+        self.send({'Action':'Login', 'ActionID':'login', 'Username':'central_piloto', 'Secret':secret, 'Events':'on'})
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            event = self.read()
+            if event.get('ActionID') == 'login':
+                if event.get('Response') != 'Success':
+                    raise PermissionError('AMI login rejected')
+                return
+        raise TimeoutError('AMI login timeout')
 
 
-def api(path, token, payload=None):
-    data = None if payload is None else json.dumps(payload).encode()
-    req = Request(ENDPOINT + path, data=data, headers={
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json',
-        'User-Agent': 'central-motor-agent/0.1',
-    }, method='GET' if data is None else 'POST')
-    with urlopen(req, timeout=12) as resp:
-        return json.loads(resp.read(1048576))
+def allowed_job(job):
+    return (job.get('kind') == 'internal_echo_1001' and job.get('channel') == 'PJSIP/1001'
+            and job.get('exten') == '600' and all(re.fullmatch(r'[a-f0-9-]{36}', str(job.get(k,''))) for k in ('id','lease')))
 
 
-def validate_job(job):
-    if not isinstance(job, dict):
-        return False
-    return (isinstance(job.get('id'), str) and 0 < len(job['id']) < 200 and
-            job.get('kind') == 'internal_echo_1001' and
-            hmac.compare_digest(str(job.get('channel', '')), 'PJSIP/1001') and
-            hmac.compare_digest(str(job.get('exten', '')), '600'))
+def observe(ami, action, channel_id, deadline):
+    accepted = False
+    while time.monotonic() < deadline:
+        event = ami.read()
+        # A synchronous Success only acknowledges queueing. It is never an answer.
+        if event.get('ActionID') == action:
+            if event.get('Event') == 'OriginateResponse':
+                if event.get('Response') == 'Success' and event.get('Reason') == '4':
+                    return 'answered'
+                return 'no_answer' if event.get('Reason') == '0' else 'failed'
+            if event.get('Response') == 'Error':
+                return 'failed'
+            if event.get('Response') == 'Success':
+                accepted = True
+        if event.get('Uniqueid') == channel_id:
+            if event.get('Event') == 'Newstate' and event.get('ChannelState') == '6':
+                return 'answered'
+            if event.get('Event') == 'Hangup':
+                return 'no_answer'
+    return 'accepted' if accepted else 'unknown'
 
 
-def main():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s [central-agent] %(message)s')
-    token = MOTOR_TOKEN_PATH.read_text('utf-8').strip()
-    if len(token) < 32:
-        raise RuntimeError('Token de acesso do motor ausente ou fraco')
-    LOG.info('Agente piloto iniciado — apenas chamadas internas 1001 -> 600')
+def originate(job, mark_sent, connector=socket.create_connection):
+    if not allowed_job(job):
+        return 'failed'
+    sent = False
+    try:
+        secret = (CONFIG / 'ami.secret').read_text().strip()
+        with connector(('127.0.0.1', 5038), timeout=5) as connection:
+            connection.settimeout(5)
+            ami = AMI(connection)
+            ami.login(secret)
+            # Durable before writing to TCP. A crash at this boundary becomes unknown,
+            # never a second Originate, even if the first write actually failed.
+            mark_sent()
+            sent = True
+            channel_id = 'central-' + job['id']
+            ami.send({'Action':'Originate','ActionID':job['id'],'Channel':'PJSIP/1001',
+                'Context':'central-interna','Exten':'600','Priority':'1',
+                'Timeout':'20000','Async':'true','ChannelId':channel_id})
+            deadline = time.monotonic() + 27
+            while time.monotonic() < deadline:
+                try:
+                    return observe(ami, job['id'], channel_id, deadline)
+                except socket.timeout:
+                    continue
+            return 'unknown'
+    except Exception:
+        return 'unknown' if sent else 'failed'
+
+
+def enroll():
+    code = getpass.getpass('Código de pareamento (não aparece ao digitar): ').strip()
+    if not re.fullmatch('[a-f0-9]{64}', code):
+        raise ValueError('Código inválido. Gere outro no painel.')
+    data = api('/api/agent/enroll', payload={'code':code})
+    if data.get('scope') != 'internal_echo_1001' or not re.fullmatch('[a-f0-9]{64}', data.get('agentToken','')):
+        raise ValueError('Resposta de pareamento inválida')
+    atomic(CONFIG / 'token.json', {'token':data['agentToken']})
+    print('Notebook pareado. A saída externa permanece bloqueada.')
+
+
+def run():
+    lock = open(STATE.parent / 'agent.lock', 'w')
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    token = json.loads((CONFIG / 'token.json').read_text())['token']
+    journal = json.loads(STATE.read_text()) if STATE.exists() else None
+    if journal and journal.get('phase') != 'done':
+        journal['outcome'] = journal.get('outcome', 'unknown')
+        journal['phase'] = 'report'
+        atomic(STATE, journal)
     while True:
         try:
-            reply = api('/api/agent/poll', token)
-            job = reply.get('job')
+            if journal and journal['phase'] == 'report':
+                job = journal['job']
+                try:
+                    api('/api/agent/report', token, {'id':job['id'], 'lease':job['lease'], 'outcome':journal['outcome']})
+                except urllib.error.HTTPError as error:
+                    if error.code != 409:
+                        raise
+                    # A closed/expired lease is never originated again.
+                journal['phase'] = 'done'
+                atomic(STATE, journal)
+                print('Resultado interno registrado: ' + journal['outcome'], flush=True)
+            response = api('/api/agent/poll', token)
+            if response.get('external_calls_enabled') is not False:
+                raise ValueError('Estado do motor rejeitado')
+            job = response.get('job')
             if job:
-                if not validate_job(job):
-                    LOG.warning('Job nao autorizado ignorado')
-                else:
-                    try:
-                        description = originate_internal_only()
-                        outcome = 'accepted'
-                    except (OSError, RuntimeError) as exc:
-                        description = str(exc)[:150]
-                        outcome = 'failed'
-                    LOG.info('Teste local %s: %s', job['id'], outcome)
-                    api('/api/agent/report', token, {'id': job['id'], 'outcome': outcome, 'detail': description})
-            time.sleep(4)
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-            LOG.warning('Conexao/consulta indisponivel (%s), repetindo', type(exc).__name__)
-            time.sleep(20)
+                if journal and journal['job']['id'] == job.get('id'):
+                    raise ValueError('Entrega duplicada recusada')
+                if not allowed_job(job):
+                    raise ValueError('Rota fora do piloto interno')
+                journal = {'job':job, 'phase':'prepared'}
+                atomic(STATE, journal)
+                def mark_sent():
+                    journal['phase'] = 'sent'
+                    atomic(STATE, journal)
+                journal['outcome'] = originate(job, mark_sent)
+                journal['phase'] = 'report'
+                atomic(STATE, journal)
+            else:
+                time.sleep(8)
+        except Exception:
+            # No tokens, AMI responses, caller IDs or contact data in logs.
+            print('Conexão indisponível ou operação recusada; aguardando. Nenhuma repetição de chamada.', flush=True)
+            time.sleep(15)
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--enroll', action='store_true')
+    args = parser.parse_args()
+    if args.enroll:
+        enroll()
+    else:
+        run()

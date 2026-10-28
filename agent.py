@@ -3,6 +3,8 @@
 import argparse
 import fcntl
 import getpass
+import hashlib
+import subprocess
 import json
 import os
 from pathlib import Path
@@ -16,6 +18,7 @@ import uuid
 ENDPOINT = 'https://central-ligacoes-motor-piloto.onrender.com'
 CONFIG = Path('/etc/central-motor-agent')
 STATE = Path('/var/lib/central-motor-agent/journal.json')
+VERSION = '0.6.0'
 
 
 def atomic(path, value):
@@ -91,6 +94,10 @@ class AMI:
 def allowed_job(job):
     if not isinstance(job, dict):
         return False
+    ids_ok=all(re.fullmatch(r'[a-f0-9-]{36}',str(job.get(k,''))) for k in ('id','lease'))
+    if job.get('kind')=='external_pilot_700':
+        route=local_route()
+        return bool(ids_ok and job.get('channel')=='PJSIP/1001' and job.get('context')=='central-interna' and job.get('exten')=='700' and job.get('maxSeconds')==180 and route and job.get('routeHash')==route.get('phoneHash'))
     return (job.get('kind') == 'internal_echo_1001' and job.get('channel') == 'PJSIP/1001'
             and job.get('exten') == '600' and all(re.fullmatch(r'[a-f0-9-]{36}', str(job.get(k,''))) for k in ('id','lease')))
 
@@ -158,6 +165,103 @@ def ami_probe():
         return False
 
 
+def extract_route(output):
+    targets = re.findall(r'\bDial\(\s*PJSIP/([^,\s)]+)', output, re.I)
+    if len(targets)!=1 or any(ch in targets[0] for ch in ('$','{','}','&')):
+        raise ValueError('A rota 700 precisa conter um único destino fixo PJSIP.')
+    target=targets[0]
+    direct=re.fullmatch(r'(\+?[0-9]+)@[A-Za-z0-9_.-]+',target)
+    uri=re.fullmatch(r'[A-Za-z0-9_.-]+/sip:(\+?[0-9]+)@[A-Za-z0-9_.:-]+',target)
+    match=direct or uri
+    if not match:
+        raise ValueError('Formato da rota 700 não reconhecido; nenhuma chamada liberada.')
+    phone=match.group(1).lstrip('+')
+    if len(phone) in (10,11):phone='55'+phone
+    if not re.fullmatch(r'55[1-9]\d\d{8,9}',phone):
+        raise ValueError('Destino da rota 700 não é um telefone brasileiro válido.')
+    return {'phoneHash':hashlib.sha256(phone.encode()).hexdigest(),'context':'central-interna','extension':'700'}
+
+
+def local_route():
+    try:
+        value=json.loads((CONFIG/'route.json').read_text())
+        if value.get('context')!='central-interna' or value.get('extension')!='700' or not re.fullmatch('[a-f0-9]{64}',value.get('phoneHash','')):return None
+        return value
+    except Exception:return None
+
+
+def configure_route():
+    try:
+        result=subprocess.run(['asterisk','-rx','dialplan show 700@central-interna'],capture_output=True,text=True,timeout=10,check=True)
+        atomic(CONFIG/'route.json',extract_route(result.stdout))
+        print('Rota local 700 validada. O servidor só aceitará o número de teste previamente autorizado.')
+    except Exception:
+        (CONFIG/'route.json').unlink(missing_ok=True)
+        print('Rota 700 não pôde ser validada automaticamente. Testes externos continuam bloqueados; teste interno preservado.')
+
+
+class ExternalCall:
+    def __init__(self,job,emit,clock=time.monotonic):
+        self.job=job;self.emit=emit;self.clock=clock;self.started=clock()
+        self.channel_id='central-'+job['id'];self.dest=None;self.operator_answered=False
+        self.contact_answered=False;self.bridged=False;self.done=None;self.terminal_candidate=None;self.bridges={};self.sent=set();self.operator_channel=None
+    def progress(self,phase,proof):
+        if phase in self.sent:return
+        self.sent.add(phase);self.emit(phase,proof,int((self.clock()-self.started)*1000))
+    def maybe_bridge(self):
+        if self.contact_answered:
+            for bridge,ids in self.bridges.items():
+                if self.channel_id in ids and self.dest in ids:
+                    self.bridged=True
+                    self.progress('bridged',{'event':'BridgeEnter','operatorUniqueId':self.channel_id,'destUniqueId':self.dest,'bridgeId':bridge})
+    def feed(self,e):
+        kind=e.get('Event');uid=e.get('Uniqueid');action=e.get('ActionID')
+        if uid==self.channel_id and re.fullmatch(r'PJSIP/1001-[A-Za-z0-9]+',e.get('Channel','')):self.operator_channel=e['Channel']
+        if kind=='Newstate' and uid==self.channel_id and e.get('ChannelState')=='6':
+            self.operator_answered=True;self.progress('operator_answered',{'event':'Newstate','uniqueId':uid,'channelState':'6'})
+        if action==self.job['id'] and kind=='OriginateResponse':
+            if e.get('Response')=='Failure':self.done='operator_no_answer' if not self.operator_answered else 'failed'
+            elif e.get('Response')=='Success' and e.get('Reason')=='4':
+                self.operator_answered=True;self.progress('operator_answered',{'event':kind,'actionId':action,'response':'Success','reason':'4'})
+        if action==self.job['id'] and e.get('Response')=='Error':self.done='failed'
+        if kind=='DialBegin' and uid==self.channel_id and e.get('DestUniqueid'):
+            self.dest=e['DestUniqueid'];self.progress('contact_ringing',{'event':kind,'uniqueId':uid,'destUniqueId':self.dest})
+        if kind=='DialEnd' and uid==self.channel_id and self.dest and e.get('DestUniqueid')==self.dest:
+            status=e.get('DialStatus')
+            if status=='ANSWER':
+                self.contact_answered=True;self.progress('contact_answered',{'event':kind,'uniqueId':uid,'destUniqueId':self.dest,'dialStatus':'ANSWER'});self.maybe_bridge()
+            else:self.terminal_candidate={'BUSY':'busy','NOANSWER':'no_answer','CANCEL':'no_answer'}.get(status,'failed')
+        if kind=='BridgeEnter' and uid in (self.channel_id,self.dest) and e.get('BridgeUniqueid'):
+            self.bridges.setdefault(e['BridgeUniqueid'],set()).add(uid);self.maybe_bridge()
+        if kind=='Hangup' and uid in (self.channel_id,self.dest):
+            self.progress('ended',{'event':'Hangup','uniqueId':uid})
+            if uid==self.channel_id:self.done='completed' if self.bridged else self.terminal_candidate or ('failed' if self.operator_answered else 'operator_no_answer')
+        return self.done
+
+
+def originate_external(job,mark_sent,emit,connector=socket.create_connection):
+    if not allowed_job(job):return 'failed'
+    sent=False
+    try:
+        with connector(('127.0.0.1',5038),timeout=5) as connection:
+            connection.settimeout(3);ami=AMI(connection);ami.login((CONFIG/'ami.secret').read_text().strip())
+            tracker=ExternalCall(job,emit);mark_sent();sent=True
+            ami.send({'Action':'Originate','ActionID':job['id'],'Channel':'PJSIP/1001','Context':'central-interna','Exten':'700','Priority':'1','Timeout':'20000','Async':'true','ChannelId':tracker.channel_id,'Variable':'TIMEOUT(absolute)=180'})
+            tracker.progress('operator_ringing',{'event':'Originate','actionId':job['id']})
+            deadline=time.monotonic()+210;last_heartbeat=time.monotonic()
+            while time.monotonic()<deadline:
+                try:
+                    outcome=tracker.feed(ami.read())
+                    if outcome:return outcome
+                except socket.timeout:pass
+                if time.monotonic()-last_heartbeat>=10:
+                    emit('heartbeat',{},int((time.monotonic()-tracker.started)*1000));last_heartbeat=time.monotonic()
+            if tracker.operator_channel:
+                ami.send({'Action':'Hangup','ActionID':'stop-'+job['id'],'Channel':tracker.operator_channel})
+            return 'unknown'
+    except Exception:return 'unknown' if sent else 'failed'
+
+
 def enroll():
     code = getpass.getpass('Código de pareamento (não aparece ao digitar): ').strip()
     if not re.fullmatch('[a-f0-9]{64}', code):
@@ -174,6 +278,12 @@ def run():
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     token = json.loads((CONFIG / 'token.json').read_text())['token']
     journal = json.loads(STATE.read_text()) if STATE.exists() else None
+    def send_events():
+        if not journal:return
+        for event in journal.get('outbox',[]):
+            if event['seq']<=journal.get('sentSeq',0):continue
+            api('/api/agent/event',token,dict(event,id=journal['job']['id'],lease=journal['job']['lease']))
+            journal['sentSeq']=event['seq'];atomic(STATE,journal)
     if journal and journal.get('phase') != 'done':
         journal['outcome'] = journal.get('outcome', 'unknown')
         journal['phase'] = 'report'
@@ -183,6 +293,7 @@ def run():
             if journal and journal['phase'] == 'report':
                 job = journal['job']
                 try:
+                    send_events()
                     api('/api/agent/report', token, {'id':job['id'], 'lease':job['lease'], 'outcome':journal['outcome']})
                 except urllib.error.HTTPError as error:
                     if error.code != 409:
@@ -190,8 +301,9 @@ def run():
                     # A closed/expired lease is never originated again.
                 journal['phase'] = 'done'
                 atomic(STATE, journal)
-                print('Resultado interno registrado: ' + journal['outcome'], flush=True)
-            response = api('/api/agent/poll?ami_ready=' + ('1' if ami_probe() else '0'), token)
+                print('Resultado telefônico registrado: ' + journal['outcome'], flush=True)
+            route=local_route()
+            response = api('/api/agent/poll?ami_ready=' + ('1' if ami_probe() else '0') + '&version='+VERSION+'&route_hash='+(route['phoneHash'] if route else ''), token)
             if response.get('external_calls_enabled') is not False:
                 raise ValueError('Estado do motor rejeitado')
             job = response.get('job')
@@ -205,7 +317,12 @@ def run():
                 def mark_sent():
                     journal['phase'] = 'sent'
                     atomic(STATE, journal)
-                journal['outcome'] = originate(job, mark_sent)
+                def emit(phase,proof,elapsed):
+                    journal.setdefault('outbox',[]).append({'seq':len(journal.get('outbox',[]))+1,'phase':phase,'proof':proof,'elapsedMs':elapsed})
+                    atomic(STATE,journal)
+                    try:send_events()
+                    except Exception:pass
+                journal['outcome'] = originate_external(job,mark_sent,emit) if job['kind']=='external_pilot_700' else originate(job, mark_sent)
                 journal['phase'] = 'report'
                 atomic(STATE, journal)
             else:
@@ -219,8 +336,11 @@ def run():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--enroll', action='store_true')
+    parser.add_argument('--configure-route',action='store_true')
     args = parser.parse_args()
-    if args.enroll:
+    if args.configure_route:
+        configure_route()
+    elif args.enroll:
         enroll()
     else:
         run()

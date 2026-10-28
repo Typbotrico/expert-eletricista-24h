@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Central de Ligações · Directcall</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:#08192d;color:#e7f3ff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 90% -10%,#164579,transparent 55%),#08192d;min-height:100vh}main{max-width:980px;margin:auto;padding:36px 20px 64px}nav{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2f5271;padding-bottom:20px;flex-wrap:wrap;gap:12px}nav b{font-size:18px}.pill{border:1px solid #376b94;background:#123355;border-radius:99px;font-size:12px;padding:8px 13px;color:#abd6f6}h1{font-size:clamp(26px,4vw,41px);line-height:1.2;margin:36px 0 14px}p{color:#b5d1e6}.subtitle{max-width:750px}.grid{display:grid;grid-template-columns:1.2fr 1fr;gap:16px;margin:24px 0}.card{border-radius:18px;border:1px solid #315272;padding:24px;background:#102942}.card h2{font-size:18px;margin:0 0 15px}label{display:block;color:#d7eafb;font-weight:600;font-size:13px;margin:13px 0 6px}input{background:#0a1d30;border:1px solid #4d779e;border-radius:10px;padding:13px;color:#fff;width:100%;font:16px system-ui}.actions{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.btn{display:inline-block;background:#227ce1;color:white;border:0;border-radius:11px;text-decoration:none;padding:13px 16px;font-weight:700;cursor:pointer;font:700 14px system-ui}.btn.alt{background:#1a456c}button:disabled{opacity:.5}a{color:#92cfff}small{font-size:12px;color:#afc8dd}ol{padding-left:20px;color:#bed5e8}li{margin:12px 0}.notice{border-left:3px solid #e8b95c;background:#342e26;padding:16px;border-radius:9px;color:#f3dba9}#status{font-size:13px;color:#a9e8c3;min-height:23px}#health{color:#9acee4}@media(max-width:700px){.grid{grid-template-columns:1fr}.card{padding:18px}}
+</style></head><body><main>
+<nav><b>☎ CENTRAL DE LIGAÇÕES</b><span class="pill">Ponte Directcall · Sem VPS</span></nav>
+<h1>Operação pelo navegador</h1>
+<p class="subtitle">Nossa Central e o Directcall APP trabalham em conjunto. O áudio é tratado pela operadora. Esta página auxilia o operador, mas não inicia chamadas: clique em <strong>Ligar</strong> dentro do APP após conferir o número.</p>
+<div class="grid"><section class="card"><h2>Preparar ligação</h2>
+<label for="phone">Número do contato com DDD</label><input id="phone" inputmode="tel" autocomplete="off" placeholder="(24) 99999-9999">
+<div class="actions"><button class="btn" type="button" id="copy">Copiar telefone</button><button class="btn alt" type="button" id="vendor">Abrir Directcall APP</button></div>
+<div id="status" role="status" aria-live="polite"></div><small>Se você instalou o complemento do Chrome, use o botão “Ligar via Directcall” dentro do site original para preencher o APP automaticamente.</small>
+</section><section class="card"><h2>Verificação do motor</h2><p id="health">O estado do motor é consultado na própria Central.</p><p>Motor de campanhas e Directcall APP são componentes diferentes. A discagem deste painel é manual, sem chamadas automáticas.</p><div class="actions"><a class="btn alt" href="https://central-de-ligacoes.ricogisi.chatgpt.site/" rel="noreferrer">Abrir Central original</a></div></section></div>
+<section class="card"><h2>Como usar com segurança</h2><ol>
+<li>Entre no <a href="https://painel.directcallsoft.com/login" target="_blank" rel="noopener noreferrer">Gestor Directcall</a> e abra o Directcall APP com <b>Via navegador</b> selecionado.</li>
+<li>Selecione o contato na Central; com o complemento do Chrome instalado, clique em <b>Ligar via Directcall</b>. Sem complemento, copie o telefone nesta tela e cole no APP.</li>
+<li>Confira o destino e <b>inicie a ligação no próprio Directcall APP</b>. O áudio utiliza o microfone configurado no Chrome.</li>
+</ol><p class="notice"><strong>Atenção:</strong> chamadas podem consumir seu saldo na Directcall. Não armazenamos senha, não enviamos os números preenchidos a este servidor e não confundimos pedido de chamada com atendimento real.</p></section>
+<p><small>Central 0.7 · Interface auxiliar · A integração definitiva do botão nativo e a sincronização dos resultados exigem acesso de edição ao site original e a API específica da operadora.</small></p>
+</main><script>
+"use strict";
+const input=document.getElementById('phone'),status=document.getElementById('status');
+function clean(v){let p=v.replace(/\D/g,'');if(p.length===10||p.length===11)p='55'+p;return /^55[1-9]\d(?:\d{8}|\d{9})$/.test(p)?p:null}
+document.getElementById('copy').addEventListener('click',async()=>{const n=clean(input.value);if(!n){status.textContent='Informe um telefone brasileiro válido com DDD.';return;}try{await navigator.clipboard.writeText(n);status.textContent='Telefone copiado. Confira no Directcall APP antes de ligar.';}catch{input.focus();input.select();status.textContent='Selecione e copie o telefone; permissão da área de transferência indisponível.';}});
+document.getElementById('vendor').addEventListener('click',()=>{window.open('https://painel.directcallsoft.com/login','_blank','noopener,noreferrer');status.textContent='Abra o Directcall APP e confira o telefone antes de iniciar a ligação.';});
+
+</script></body></html>

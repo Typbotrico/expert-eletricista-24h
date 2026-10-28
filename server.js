@@ -69,6 +69,14 @@ function createMotor({adminToken,agentToken,store,backup={selected:'',campaigns:
  const server=http.createServer(async(req,res)=>{
   const path=new URL(req.url,'http://localhost').pathname;
   if(req.method==='GET'&&(path==='/health'||path==='/api/public/status'))return reply(res,ready&&storageHealthy?200:503,status());
+  if(req.method==='GET'&&path==='/directcall'){
+    const html=require('node:fs').readFileSync(require('node:path').join(__dirname,'directcall-operator.html'),'utf8');
+    res.writeHead(200,{
+      'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',
+      'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
+      'Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    });return res.end(html);
+  }
   if(req.method==='GET'&&path==='/laboratorio-telefonia'){
    const html=require('node:fs').readFileSync(require('node:path').join(__dirname,'telephony-lab.html'),'utf8');
    res.writeHead(200,{

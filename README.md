@@ -1,4 +1,4 @@
-# Central original + motor piloto 0.6
+# Central original + motor de testes 0.7
 
 Site preservado: https://central-de-ligacoes.ricogisi.chatgpt.site/
 Motor existente: https://central-ligacoes-motor-piloto.onrender.com/
@@ -62,3 +62,16 @@ A ligação reserva o vendedor primeiro: `PJSIP/1001` atende, então o Asterisk 
 O agente já instalado permanece no modo interno até a atualização. O mesmo `install-agent.sh` agora reaproveita `token.json` e solicita novo pareamento apenas se não encontrar token válido. Copia o segredo AMI já existente, consulta `dialplan show 700@central-interna` e não muda os arquivos do Asterisk. Os formatos PJSIP fixos suportados são `número@endpoint` e `endpoint/sip:número@host`; destinos dinâmicos ou múltiplos são recusados. O instalador verifica o SHA-256 do agente antes de instalar e reinicia somente `central-motor-agent`.
 
 O motor exige também o módulo `pilot-external.cjs`, incluído no mesmo commit. Testes locais usam eventos AMI simulados e número sintético; não comprovam voz real. A homologação final exige atualização local, chamada pelo botão do site, confirmação de áudio nos dois aparelhos, encerramento e classificação.
+
+
+## Fila sequencial 0.7
+
+A lista autorizada é configurada exclusivamente em `CENTRAL_TEST_NUMBERS` no ambiente privado do Render. Nenhum número real é versionado no GitHub. O endpoint administrativo `/api/admin/test-list` fornece a lista ao backend proprietário; `Preparar campanha com os quatro contatos` cria/atualiza uma campanha idempotente na conta e seleciona essa campanha sem iniciar chamadas.
+
+O agente atualizado reutiliza o tronco PJSIP extraído localmente da rota 700, sem modificar o dialplan. Para a fila, origina `PJSIP/1001` e executa somente a aplicação fixa Dial com destino numérico autorizado e template local validado. Mantém o formato nacional/internacional da configuração que funcionou. Rejeita números fora da política obtida por HTTPS autenticado, versão divergente e qualquer alteração de aplicação, vendedor ou limite de tempo.
+
+O início da rodada é explícito. Um contato por vez, 15 segundos entre chamadas, 1 tentativa na campanha preparada, limite absoluto de 3 tentativas configuradas por contato por rodada. Duplicados por telefone são eliminados. Números fictícios, bloqueados, removidos ou fora da autorização não são entregues. O servidor consulta a conta persistida antes de cada entrega, inclusive para conferir novos bloqueios. Sem acesso a essa fonte, pausa a fila. O snapshot da rodada não aceita novos números adicionados após seu início.
+
+O vendedor deve atender primeiro a cada tentativa. Se ele não atender, a fila pausa. Pausar/parar não encerra conversa ativa; impede as próximas. Retomar preserva as tentativas. Resultados desconhecidos retêm a reserva do ramal até conferência e liberação manual. Não há repetição automática de uma rodada concluída. Nenhuma chamada real desta fila foi comprovada apenas pelos testes automatizados.
+
+A política de autorização não é um mecanismo para validar se uma linha existe ou se alguém atenderá. A confirmação de voz continua humana. Os resultados e eventos reais usam o mesmo journal, idempotência, correlação AMI e armazenamento D1 do piloto anterior. Os testes locais usam apenas números sintéticos e sockets/servidores substitutos.

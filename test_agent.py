@@ -72,4 +72,20 @@ class ExternalPilotTest(unittest.TestCase):
         self.assertIsNone(tracker.feed({'Event':'DialEnd','Uniqueid':uid,'DestUniqueid':'dest','DialStatus':'BUSY'}))
         self.assertEqual(tracker.feed({'Event':'Hangup','Uniqueid':uid}),'busy')
 
+
+
+class CampaignJobsTest(unittest.TestCase):
+    def test_campaign_job_can_only_dial_a_phone_in_current_policy_using_local_template(self):
+        old_route=a.local_route;old_policy=a.POLICY
+        try:
+            route=a.extract_route('Dial(PJSIP/5524999999901@directcall,60)');a.local_route=lambda:route
+            a.POLICY={'phones':['5524999999902'],'revision':'a'*64}
+            job={'id':str(a.uuid.uuid4()),'lease':str(a.uuid.uuid4()),'kind':'campaign_call','channel':'PJSIP/1001','maxSeconds':180,'targetPhone':'5524999999902','policyRevision':'a'*64}
+            self.assertTrue(a.allowed_job(job));self.assertEqual(a.dial_target(route,job['targetPhone']),'PJSIP/5524999999902@directcall')
+            self.assertFalse(a.allowed_job(dict(job,targetPhone='5524999999903')));self.assertFalse(a.allowed_job(dict(job,policyRevision='b'*64)))
+            with self.assertRaises(ValueError):a.dial_target(route,'5524999999902,Action:Command')
+        finally:a.local_route=old_route;a.POLICY=old_policy
+    def test_national_dial_format_is_preserved(self):
+        route=a.extract_route('Dial(PJSIP/24999999901@directcall,60)');self.assertEqual(a.dial_target(route,'5524999999902'),'PJSIP/24999999902@directcall')
+
 if __name__=='__main__': unittest.main()

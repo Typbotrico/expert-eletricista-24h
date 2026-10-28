@@ -12,7 +12,7 @@ if [ -z "$ami_source" ]; then echo 'Não encontrei o arquivo da senha AMI existe
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 curl --fail --silent --show-error --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Typbotrico/expert-eletricista-24h/central-ligacoes-motor-piloto/agent.py' -o "$work_dir/agent.py"
-printf '%s  %s\n' 'a6d549279b03c6ef6b1903954de67449f2bf80266d5c62c0bd9e97b684b49d6c' "$work_dir/agent.py" | sha256sum --check --status
+printf '%s  %s\n' '8a674081d7a9114c078ee4bb7b656dc37d0ca9dff9915c3aaf1840e4102800ef' "$work_dir/agent.py" | sha256sum --check --status
 id central-motor >/dev/null 2>&1 || useradd --system --home-dir /var/lib/central-motor-agent --shell /usr/sbin/nologin central-motor
 install -d -m 700 -o central-motor -g central-motor /etc/central-motor-agent /var/lib/central-motor-agent
 install -d -m 755 /opt/central-motor-agent
@@ -30,7 +30,7 @@ systemctl stop central-motor-agent.service 2>/dev/null || true
 install -m 755 "$work_dir/agent.py" /opt/central-motor-agent/agent.py
 cat > /etc/systemd/system/central-motor-agent.service <<'UNIT'
 [Unit]
-Description=Central de Ligacoes - agente piloto 1001 e rota fixa 700
+Description=Central de Ligacoes - fila de testes com vendedor 1001
 After=network-online.target asterisk.service
 Wants=network-online.target
 [Service]
@@ -55,4 +55,4 @@ systemctl daemon-reload
 systemctl enable --now central-motor-agent.service
 systemctl is-active --quiet central-motor-agent.service
 echo 'Agente iniciado. Abra Telefonia real no painel e clique em Atualizar conexão.'
-echo 'Nenhuma configuração Asterisk ou regra de rede foi alterada. Piloto externo depende da validação da rota 700 pelo servidor.'
+echo 'Nenhuma configuração Asterisk ou regra de rede foi alterada. Fila restrita aos números de teste autorizados no servidor.'

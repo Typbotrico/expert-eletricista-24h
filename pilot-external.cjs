@@ -2,7 +2,7 @@
 const crypto=require('node:crypto');
 const HASH=/^[a-f0-9]{64}$/;
 const hash=phone=>crypto.createHash('sha256').update(phone).digest('hex');
-const external=j=>j.kind==='external_pilot_700';
+const external=j=>['external_pilot_700','campaign_call'].includes(j.kind);
 const active=j=>['queued','leased'].includes(j.state)||(external(j)&&j.state==='unknown'&&!j.reservationReleased);
 const fictional=p=>p.demo===true||/exemplo|fict[ií]ci/i.test(String(p.name)+' '+String(p.note));
 function policyFromBackup(backup,campaignId){
@@ -50,5 +50,5 @@ function applyEvent(job,body,at){
  if(body.phase==='ended'){job.hangupConfirmed=true;job.talkSeconds=job.bridgeConfirmed?Math.max(0,Math.floor((elapsed-job.bridgeElapsedMs)/1000)):0;}
  job.lastSeq=body.seq;job.lastElapsedMs=elapsed;return true;
 }
-function callView(j){const {lease,key,routeHash,...safe}=j;return safe;}
+function callView(j){const {lease,key,routeHash,targetPhone,...safe}=j;return safe;}
 module.exports={HASH,hash,external,active,policyFromBackup,candidate,applyEvent,callView};

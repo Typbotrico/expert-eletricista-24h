@@ -18,7 +18,8 @@ import uuid
 ENDPOINT = 'https://central-ligacoes-motor-piloto.onrender.com'
 CONFIG = Path('/etc/central-motor-agent')
 STATE = Path('/var/lib/central-motor-agent/journal.json')
-VERSION = '0.6.0'
+VERSION = '0.7.0'
+POLICY={'phones':[],'revision':''}
 
 
 def atomic(path, value):
@@ -95,6 +96,9 @@ def allowed_job(job):
     if not isinstance(job, dict):
         return False
     ids_ok=all(re.fullmatch(r'[a-f0-9-]{36}',str(job.get(k,''))) for k in ('id','lease'))
+    if job.get('kind')=='campaign_call':
+        route=local_route()
+        return bool(ids_ok and job.get('channel')=='PJSIP/1001' and job.get('maxSeconds')==180 and job.get('policyRevision')==POLICY.get('revision') and job.get('targetPhone') in POLICY.get('phones',[]) and route and valid_template(route))
     if job.get('kind')=='external_pilot_700':
         route=local_route()
         return bool(ids_ok and job.get('channel')=='PJSIP/1001' and job.get('context')=='central-interna' and job.get('exten')=='700' and job.get('maxSeconds')==180 and route and job.get('routeHash')==route.get('phoneHash'))
@@ -179,7 +183,18 @@ def extract_route(output):
     if len(phone) in (10,11):phone='55'+phone
     if not re.fullmatch(r'55[1-9]\d\d{8,9}',phone):
         raise ValueError('Destino da rota 700 não é um telefone brasileiro válido.')
-    return {'phoneHash':hashlib.sha256(phone.encode()).hexdigest(),'context':'central-interna','extension':'700'}
+    return {'phoneHash':hashlib.sha256(phone.encode()).hexdigest(),'context':'central-interna','extension':'700','dialTemplate':'PJSIP/'+target.replace(match.group(1),'{number}',1),'numberFormat':'national' if len(match.group(1).lstrip('+')) in (10,11) else 'international'}
+
+
+def valid_template(route):
+    target=route.get('dialTemplate','')
+    return bool(re.fullmatch(r'PJSIP/(?:\{number\}@[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+/sip:\{number\}@[A-Za-z0-9_.:-]+)',target) and route.get('numberFormat') in ('national','international'))
+
+
+def dial_target(route,phone):
+    if not valid_template(route) or not re.fullmatch(r'55[1-9]\d\d{8,9}',str(phone)):
+        raise ValueError('Destino ou tronco fora da configuração validada')
+    return route['dialTemplate'].replace('{number}',phone[2:] if route['numberFormat']=='national' else phone)
 
 
 def local_route():
@@ -246,7 +261,10 @@ def originate_external(job,mark_sent,emit,connector=socket.create_connection):
         with connector(('127.0.0.1',5038),timeout=5) as connection:
             connection.settimeout(3);ami=AMI(connection);ami.login((CONFIG/'ami.secret').read_text().strip())
             tracker=ExternalCall(job,emit);mark_sent();sent=True
-            ami.send({'Action':'Originate','ActionID':job['id'],'Channel':'PJSIP/1001','Context':'central-interna','Exten':'700','Priority':'1','Timeout':'20000','Async':'true','ChannelId':tracker.channel_id,'Variable':'TIMEOUT(absolute)=180'})
+            action={'Action':'Originate','ActionID':job['id'],'Channel':'PJSIP/1001','Timeout':'20000','Async':'true','ChannelId':tracker.channel_id,'Variable':'TIMEOUT(absolute)=180'}
+            if job['kind']=='campaign_call':action.update({'Application':'Dial','Data':dial_target(local_route(),job['targetPhone'])+',45'})
+            else:action.update({'Context':'central-interna','Exten':'700','Priority':'1'})
+            ami.send(action)
             tracker.progress('operator_ringing',{'event':'Originate','actionId':job['id']})
             deadline=time.monotonic()+210;last_heartbeat=time.monotonic()
             while time.monotonic()<deadline:
@@ -276,6 +294,7 @@ def enroll():
 def run():
     lock = open(STATE.parent / 'agent.lock', 'w')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    global POLICY
     token = json.loads((CONFIG / 'token.json').read_text())['token']
     journal = json.loads(STATE.read_text()) if STATE.exists() else None
     def send_events():
@@ -302,8 +321,11 @@ def run():
                 journal['phase'] = 'done'
                 atomic(STATE, journal)
                 print('Resultado telefônico registrado: ' + journal['outcome'], flush=True)
+            policy=api('/api/agent/policy',token)
+            if not isinstance(policy.get('phones'),list) or len(policy['phones'])>10 or any(not re.fullmatch(r'55[1-9]\d\d{8,9}',str(p)) for p in policy['phones']) or not re.fullmatch('[a-f0-9]{64}',policy.get('revision','')):raise ValueError('Política de destinos inválida')
+            POLICY=policy
             route=local_route()
-            response = api('/api/agent/poll?ami_ready=' + ('1' if ami_probe() else '0') + '&version='+VERSION+'&route_hash='+(route['phoneHash'] if route else ''), token)
+            response = api('/api/agent/poll?ami_ready=' + ('1' if ami_probe() else '0') + '&version='+VERSION+'&route_hash='+(route['phoneHash'] if route else '')+'&template_ready='+('1' if route and valid_template(route) else '0')+'&policy_revision='+POLICY['revision'], token)
             if response.get('external_calls_enabled') is not False:
                 raise ValueError('Estado do motor rejeitado')
             job = response.get('job')
@@ -322,7 +344,7 @@ def run():
                     atomic(STATE,journal)
                     try:send_events()
                     except Exception:pass
-                journal['outcome'] = originate_external(job,mark_sent,emit) if job['kind']=='external_pilot_700' else originate(job, mark_sent)
+                journal['outcome'] = originate_external(job,mark_sent,emit) if job['kind']!='internal_echo_1001' else originate(job, mark_sent)
                 journal['phase'] = 'report'
                 atomic(STATE, journal)
             else:

@@ -1,6 +1,19 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const flow=require('./campaign-queue.cjs'),{createMotor}=require('./server.js');
 const phones=['5524999999901','5524999999902','5524999999903','5524999999904'];
+test('post-call work pauses dispatch and resume requires an actual classification',()=>{
+ const now=Date.parse('2026-10-28T15:00:00Z'),state={backup:fixture(),queue:[]};
+ const {run}=flow.start(state,'test-list','post-call-round-key',policy,now,true);const job=flow.next(state,policy,now);job.state='completed';job.outcome='completed';
+ flow.finish(state,job,now);assert.equal(run.status,'paused');assert.equal(run.reason,'aguardando_classificacao');assert.equal(flow.next(state,policy,now+20000),null);
+ assert.throws(()=>flow.start(state,'test-list','post-call-resume-1',policy,now+20000,true),/aguardando_classificacao/);
+ job.classification='Sem classificação';assert.throws(()=>flow.start(state,'test-list','post-call-resume-2',policy,now+20000,true),/aguardando_classificacao/);
+ job.classification='Interessado';flow.start(state,'test-list','post-call-resume-3',policy,now+20000,true);assert.equal(flow.next(state,policy,now+20000).contactId,'c1');
+});
+test('a scheduled contact cannot be delivered early and source DNC still wins',()=>{
+ const now=Date.parse('2026-10-28T15:00:00Z'),state={backup:fixture(),queue:[]};state.backup.campaigns[0].contacts.forEach(p=>p.callbackAt=new Date(now+60000).toISOString());
+ flow.start(state,'test-list','callback-round-key',policy,now,true);assert.equal(flow.next(state,policy,now),null);assert.equal(flow.next(state,policy,now+59999),null);
+ state.backup.globalBlock=[phones[0]];assert.equal(flow.next(state,policy,now+60000).contactId,'c1');
+});
 const admin='a'.repeat(64),agent='b'.repeat(64),policy=flow.makePolicy(phones);
 function fixture(){return {selected:'test-list',globalBlock:[],campaigns:[{id:'test-list',name:'Lista sintética',agents:1,lines:1,start:'09:00',end:'18:00',retryLimit:1,retryMinutes:60,history:[],block:[],contacts:phones.map((phone,i)=>({id:'c'+i,name:'Teste '+i,phone,status:'Pendente'}))}]};}
 async function setup(){let source=fixture(),saved=null,readFails=false,time=Date.parse('2026-10-28T15:00:00Z');const store={kind:'test',async load(){return structuredClone(saved)},async save(s){saved=structuredClone(s)},async readWorkspace(owner){if(readFails)throw Error('source offline');assert.equal(owner,'owner-test');return structuredClone(source)}};

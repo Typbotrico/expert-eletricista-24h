@@ -6,6 +6,7 @@ function hours(c,now){const time=new Intl.DateTimeFormat('pt-BR',{timeZone:'Amer
 const fictitious=p=>p.demo===true||/exemplo|fict[ií]ci/i.test(String(p.name)+' '+String(p.note));
 function eligible(state,c,p,policy){return p&&!fictitious(p)&&policy.phones.includes(normalize(p.phone))&&['Pendente','Retornar','Não atendeu'].includes(p.status)&&![...(state.backup.globalBlock||[]),...(c.block||[])].some(n=>normalize(n)===normalize(p.phone)||n===p.id);}
 function campaign(state,id){return state.backup.campaigns.find(c=>c.id===id);}
+const needsResult=j=>j.kind==='campaign_call'&&j.state==='completed'&&(!j.classification||j.classification==='Sem classificação');
 function start(state,id,key,policy,now,ready){
  state.runs??=[];const prior=state.runs.find(r=>r.key===key||(r.requestKeys||[]).includes(key));if(prior)return {run:prior,replayed:true};
  const c=campaign(state,id);if(!c)throw Error('campanha_nao_encontrada');
@@ -13,6 +14,7 @@ function start(state,id,key,policy,now,ready){
  if(!hours(c,now))throw Error('fora_do_expediente');
  if(c.agents!==1||c.lines!==1)throw Error('piloto_exige_um_atendente_e_uma_linha');
  const current=state.runs.find(r=>r.campaignId===id&&r.status==='paused');
+ if(current&&state.queue.some(j=>j.runId===current.id&&needsResult(j)))throw Error('aguardando_classificacao');
  if(state.runs.some(r=>r.status==='running'))throw Error('fila_ja_em_execucao');
  if(state.queue.some(ext.active))throw Error('ramal_reservado_ou_aguarde_15s');
  if(current){current.status='running';current.requestKeys=[...(current.requestKeys||[]),key].slice(-100);current.reason=null;current.resumedAt=new Date(now).toISOString();return {run:current,resumed:true};}
@@ -26,10 +28,12 @@ function next(state,policy,now){
  if(state.queue.some(ext.active))return null;
  const run=state.runs?.find(r=>r.status==='running');if(!run||run.nextAt>now)return null;
  const c=campaign(state,run.campaignId);
+ if(state.queue.some(j=>j.runId===run.id&&needsResult(j))){run.status='paused';run.reason='aguardando_classificacao';return null;}
  if(!c||!hours(c,now)){run.status='paused';run.reason=c?'fora_do_expediente':'campanha_nao_encontrada';return null;}
  for(const entry of run.entries){
   const p=c.contacts.find(p=>p.id===entry.contactId&&normalize(p.phone)===entry.phone);
   if(!eligible(state,c,p,policy)){entry.skipped=true;entry.reason='bloqueado_ou_removido';continue;}
+  if(p.callbackAt&&Number.isFinite(Date.parse(p.callbackAt))&&Date.parse(p.callbackAt)>now){entry.nextAt=Date.parse(p.callbackAt);continue;}
   if(entry.attempts>=run.maxAttempts||entry.nextAt>now||entry.done)continue;
   entry.attempts++;entry.inFlight=true;
   const job={id:crypto.randomUUID(),key:run.id+'-'+entry.contactId+'-'+entry.attempts,kind:'campaign_call',state:'queued',phase:'reserved',createdAt:new Date(now).toISOString(),createdMs:now,campaignId:c.id,runId:run.id,contactId:p.id,contactName:p.name,phoneMasked:'••••'+entry.phone.slice(-4),targetPhone:entry.phone,channel:'PJSIP/1001',maxSeconds:180,events:[],lastSeq:0};
@@ -45,6 +49,7 @@ function finish(state,job,now){
  entry.lastOutcome=job.outcome;entry.inFlight=job.outcome==='unknown';
  if(job.outcome==='unknown'){run.status='paused';run.reason='resultado_desconhecido';return;}
  if(['completed','failed'].includes(job.outcome))entry.done=true;
+ if(job.outcome==='completed'&&needsResult(job)&&run.status!=='stopped'){run.status='paused';run.reason='aguardando_classificacao';return;}
  if(job.outcome==='operator_no_answer'){entry.attempts=Math.max(0,entry.attempts-1);entry.nextAt=now;run.nextAt=now;run.status='paused';run.reason='vendedor_nao_atendeu';return;}
  entry.nextAt=now+run.retryMs;run.nextAt=now+15000;
  if(run.entries.every(e=>e.skipped||e.done||e.attempts>=run.maxAttempts)&&run.status==='running'){run.status='completed';run.finishedAt=new Date(now).toISOString();}

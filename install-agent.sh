@@ -12,7 +12,7 @@ if [ -z "$ami_source" ]; then echo 'Não encontrei o arquivo da senha AMI existe
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 curl --fail --silent --show-error --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/Typbotrico/expert-eletricista-24h/central-ligacoes-motor-piloto/agent.py' -o "$work_dir/agent.py"
-printf '%s  %s\n' '294086a2c1e64b44e2f23dd0d3f729bc571257b4244a56facf3729c19964fa27' "$work_dir/agent.py" | sha256sum --check --status
+printf '%s  %s\n' 'e11177923116b07f0da4064e363261dd64708ae261fd0bed7c7473f2f11d4c93' "$work_dir/agent.py" | sha256sum --check --status
 id central-motor >/dev/null 2>&1 || useradd --system --home-dir /var/lib/central-motor-agent --shell /usr/sbin/nologin central-motor
 install -d -m 700 -o central-motor -g central-motor /etc/central-motor-agent /var/lib/central-motor-agent
 install -d -m 755 /opt/central-motor-agent

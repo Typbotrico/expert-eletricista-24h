@@ -89,6 +89,8 @@ class AMI:
 
 
 def allowed_job(job):
+    if not isinstance(job, dict):
+        return False
     return (job.get('kind') == 'internal_echo_1001' and job.get('channel') == 'PJSIP/1001'
             and job.get('exten') == '600' and all(re.fullmatch(r'[a-f0-9-]{36}', str(job.get(k,''))) for k in ('id','lease')))
 
@@ -144,6 +146,18 @@ def originate(job, mark_sent, connector=socket.create_connection):
         return 'unknown' if sent else 'failed'
 
 
+def ami_probe():
+    """Check loopback AMI login without originating a call or changing Asterisk."""
+    try:
+        secret = (CONFIG / 'ami.secret').read_text().strip()
+        with socket.create_connection(('127.0.0.1', 5038), timeout=3) as connection:
+            connection.settimeout(3)
+            AMI(connection).login(secret)
+        return True
+    except Exception:
+        return False
+
+
 def enroll():
     code = getpass.getpass('Código de pareamento (não aparece ao digitar): ').strip()
     if not re.fullmatch('[a-f0-9]{64}', code):
@@ -177,7 +191,7 @@ def run():
                 journal['phase'] = 'done'
                 atomic(STATE, journal)
                 print('Resultado interno registrado: ' + journal['outcome'], flush=True)
-            response = api('/api/agent/poll', token)
+            response = api('/api/agent/poll?ami_ready=' + ('1' if ami_probe() else '0'), token)
             if response.get('external_calls_enabled') is not False:
                 raise ValueError('Estado do motor rejeitado')
             job = response.get('job')

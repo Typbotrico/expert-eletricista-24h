@@ -15,22 +15,22 @@ test('separate scopes, legacy token rejected, public status omits contacts, exte
 }finally{await x.close()}});
 test('offline agent rejects test; idempotency, lease, non-answered result and restart durability',async()=>{const x=await start();try{
  const key='unique-test-1234567890';assert.equal((await x.request('/api/pilot/internal-test','admin','POST',null,key)).status,503);
- await x.request('/api/agent/poll','agent');
+ await x.request('/api/agent/poll?ami_ready=1','agent');
  const one=await x.request('/api/pilot/internal-test','admin','POST',null,key);assert.equal(one.status,202);
  const repeat=await x.request('/api/pilot/internal-test','admin','POST',null,key);assert.equal(repeat.body.jobId,one.body.jobId);assert.equal(x.store.saved.queue.length,1);
- const job=(await x.request('/api/agent/poll','agent')).body.job;
+ const job=(await x.request('/api/agent/poll?ami_ready=1','agent')).body.job;
  assert.equal((await x.request('/api/agent/report','agent','POST',{id:job.id,lease:'wrong',outcome:'answered'})).status,409);
  assert.equal((await x.request('/api/agent/report','agent','POST',{id:job.id,lease:job.lease,outcome:'accepted'})).status,200);
  assert.equal((await x.request('/api/agent/report','agent','POST',{id:job.id,lease:job.lease,outcome:'answered'})).status,409);
  assert.equal(x.store.saved.lastAgentResult.outcome,'accepted');assert.match(x.store.saved.lastAgentResult.meaning,/não comprova/);
- await x.close();const y=await start(x.store,x.clock);try{assert.equal(y.m.status().totals.internal_test_jobs_completed,1);assert.equal(y.m.status().agent_connected,false);assert.equal((await y.request('/api/agent/poll','agent')).body.job,null)}finally{await y.close()}
+ await x.close();const y=await start(x.store,x.clock);try{assert.equal(y.m.status().totals.internal_test_jobs_completed,1);assert.equal(y.m.status().agent_connected,false);assert.equal((await y.request('/api/agent/poll?ami_ready=1','agent')).body.job,null)}finally{await y.close()}
 }finally{if(x.m.server.listening)await x.close()}});
 test('restart never redials a leased job and pause survives a restart',async()=>{const x=await start();try{
- await x.request('/api/agent/poll','agent');await x.request('/api/pilot/internal-test','admin','POST',null,'unique-test-1234567890');await x.request('/api/agent/poll','agent');
+ await x.request('/api/agent/poll?ami_ready=1','agent');await x.request('/api/pilot/internal-test','admin','POST',null,'unique-test-1234567890');await x.request('/api/agent/poll?ami_ready=1','agent');
  assert.equal((await x.request('/api/campaign/pause','admin','POST',{campaignId:'demo'})).status,200);
- await x.close();const y=await start(x.store,x.clock);try{assert.equal(y.store.saved.queue[0].state,'unknown');assert.equal(y.store.saved.campaignControl.demo.mode,'paused');assert.equal((await y.request('/api/agent/poll','agent')).body.job,null)}finally{await y.close()}
+ await x.close();const y=await start(x.store,x.clock);try{assert.equal(y.store.saved.queue[0].state,'unknown');assert.equal(y.store.saved.campaignControl.demo.mode,'paused');assert.equal((await y.request('/api/agent/poll?ami_ready=1','agent')).body.job,null)}finally{await y.close()}
 }finally{if(x.m.server.listening)await x.close()}});
-test('database failure closes writes without claiming queue acceptance',async()=>{const store=memory(),x=await start(store);try{await x.request('/api/agent/poll','agent');store.save=async()=>{throw Error('DB offline')};assert.equal((await x.request('/api/pilot/internal-test','admin','POST',null,'unique-test-1234567890')).status,503);assert.equal(x.m.status().ready,false);assert.equal(store.saved.queue.length,0)}finally{await x.close()}});
+test('database failure closes writes without claiming queue acceptance',async()=>{const store=memory(),x=await start(store);try{await x.request('/api/agent/poll?ami_ready=1','agent');store.save=async()=>{throw Error('DB offline')};assert.equal((await x.request('/api/pilot/internal-test','admin','POST',null,'unique-test-1234567890')).status,503);assert.equal(x.m.status().ready,false);assert.equal(store.saved.queue.length,0)}finally{await x.close()}});
 test('pairing is private, one-use and expires without leaking credential in audit',async()=>{const x=await start();try{
  assert.equal((await x.request('/api/admin/pair','agent','POST')).status,403);
  const pair=await x.request('/api/admin/pair','admin','POST');assert.equal(pair.status,201);assert.equal(pair.body.code.length,64);
@@ -40,4 +40,24 @@ test('pairing is private, one-use and expires without leaking credential in audi
  const next=await x.request('/api/admin/pair','admin','POST');x.clock.value+=600001;
  assert.equal((await x.request('/api/agent/enroll',null,'POST',{code:next.body.code})).status,401);
  assert(!JSON.stringify((await x.request('/api/audit','admin')).body).includes(agentToken));
+}finally{await x.close()}});
+
+test('agent heartbeat alone cannot claim AMI connectivity or obtain an internal job',async()=>{const x=await start();try{
+ await x.request('/api/agent/poll','agent');assert.equal(x.m.status().agent_connected,true);assert.equal(x.m.status().asterisk_connected,false);
+ assert.equal((await x.request('/api/pilot/internal-test','admin','POST',null,'connectivity-test-12345')).status,503);
+ await x.request('/api/agent/poll?ami_ready=1','agent');assert.equal(x.m.status().asterisk_connected,true);
+ await x.request('/api/pilot/internal-test','admin','POST',null,'connectivity-test-12345');
+ assert.equal((await x.request('/api/agent/poll?ami_ready=0','agent')).body.job,null);
+ assert.equal(x.store.saved.queue[0].state,'queued');
+}finally{await x.close()}});
+test('sync preserves omitted campaigns, contacts, historical activities and DNC entries',async()=>{const x=await start();try{
+ const first=structuredClone(fixture);first.globalBlock=['5524000000000'];
+ first.campaigns.push({...structuredClone(fixture.campaigns[0]),id:'other'});
+ await x.request('/api/import','admin','POST',first);
+ const partial=structuredClone(fixture);partial.campaigns[0].contacts=[];partial.campaigns[0].history=[];
+ assert.equal((await x.request('/api/import','admin','POST',partial)).status,200);
+ assert.equal(x.store.saved.backup.campaigns.length,2);
+ assert.equal(x.store.saved.backup.campaigns[0].contacts.length,1);
+ assert.equal(x.store.saved.backup.campaigns[0].history.length,1);
+ assert.equal(x.store.saved.backup.globalBlock[0],'5524000000000');
 }finally{await x.close()}});

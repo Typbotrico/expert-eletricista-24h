@@ -24,6 +24,8 @@ class AgentTest(unittest.TestCase):
     def test_external_routes_rejected(self):
         job={'id':str(a.uuid.uuid4()),'lease':str(a.uuid.uuid4()),'kind':'internal_echo_1001','channel':'PJSIP/1001','exten':'600'}
         self.assertTrue(a.allowed_job(job))
+        self.assertFalse(a.allowed_job(None))
+        self.assertFalse(a.allowed_job('invalid'))
         self.assertFalse(a.allowed_job(dict(job,channel='PJSIP/5511999999999@directcall')))
         self.assertFalse(a.allowed_job(dict(job,exten='5511999999999')))
     def test_ami_injection(self):

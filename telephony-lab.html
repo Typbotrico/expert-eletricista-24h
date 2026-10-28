@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Central de Ligações — Laboratório sem VPS</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#081426;color:#ecf5ff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 90% -10%,#153c71 0,transparent 55%),#081426;min-height:100vh}
+main{max-width:960px;margin:auto;padding:32px 18px 70px}header{display:flex;gap:14px;align-items:center;justify-content:space-between;border-bottom:1px solid #274363;padding:0 0 20px;flex-wrap:wrap}
+strong{font-weight:750}.logo{font-weight:900;letter-spacing:.09em}.eyebrow{color:#75baf5;font-weight:700;letter-spacing:.09em;font-size:12px;text-transform:uppercase}h1{font-size:clamp(27px,5vw,39px);line-height:1.14;margin:28px 0 10px}h2{font-size:18px;margin:0 0 16px}
+.lead{color:#b5c7db;line-height:1.6;max-width:750px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:25px}.panel{border:1px solid #284462;background:#10253c;border-radius:17px;padding:22px}.row{display:flex;align-items:center;justify-content:space-between;gap:20px;border-top:1px solid #24415b;padding:14px 0;font-size:14px}.row span:first-child{color:#aec0d4}.good{color:#64dfbd}.warn{color:#ffd18c}.bad{color:#f5a89e}.tag{border:1px solid #4b6783;border-radius:18px;padding:7px 12px;color:#b3cee5;font-size:12px}button{cursor:pointer;background:#297def;color:white;border:0;border-radius:11px;padding:13px 19px;font-weight:700;font-size:14px}button:focus-visible,a:focus-visible{outline:3px solid #9fdaff;outline-offset:3px}p{line-height:1.6;color:#bdd0df}a{color:#90c8ff}.notice{margin:20px 0;padding:18px;border:1px solid #77532b;background:#3c2d1f;border-radius:14px;color:#fbe1bc;font-size:14px}.notice strong{color:#fff3d9}.step{font-weight:700;color:#f5f9ff}.foot{font-size:12px;color:#abc2d6;margin-top:26px}@media(max-width:690px){.grid{grid-template-columns:1fr}}
+</style></head>
+<body><main>
+<header><div class="logo">CENTRAL DE LIGAÇÕES <span class="tag">LAB SEM VPS</span></div><a href="/">Voltar ao motor</a></header>
+<div class="eyebrow">Integração experimental • sem custo de hospedagem adicional</div>
+<h1>Verificação da telefonia diretamente no navegador</h1>
+<p class="lead">Este laboratório utiliza o motor que já temos no Render. Verifica se o navegador consegue acessar o microfone e se o backend está disponível. A operação real dependerá da ativação do recurso correto na conta Directcall.</p>
+<section class="grid">
+<div class="panel"><h2>Estado da infraestrutura</h2>
+<div class="row"><span>Motor Render</span><strong id="motor">Verificando…</strong></div>
+<div class="row"><span>API do motor</span><strong id="api">Verificando…</strong></div>
+<div class="row"><span>Telefonia Directcall via REST</span><strong class="warn">Piloto bloqueado</strong></div>
+<div class="row"><span>WebRTC Directcall</span><strong class="warn">Aguardando homologação</strong></div>
+<div class="row"><span>VPS externa</span><strong class="good">Não usada neste laboratório</strong></div>
+<button id="refresh" type="button">Atualizar diagnóstico</button>
+</div>
+<div class="panel"><h2>Teste de microfone</h2>
+<p>O teste pede acesso ao microfone, verifica se o áudio pode ser capturado e encerra imediatamente. Nada é gravado ou enviado ao servidor.</p>
+<button id="mic" type="button">Testar meu microfone</button>
+<p id="mic-result" role="status" aria-live="polite">Ainda não testado.</p>
+<p><small>Para a ligação completa com headset, o fornecedor ainda precisa disponibilizar ou autorizar a integração WebRTC.</small></p>
+</div></section>
+<div class="notice"><strong>Sem chamadas faturáveis neste laboratório.</strong> Nenhuma ligação é originada por esta página. O motor existente mantém os endpoints de telefonia protegidos por autenticação e bloqueados até configurar a conta da operadora e realizar testes autorizados.</div>
+<section class="panel">
+<h2>Plano sem VPS</h2>
+<p><span class="step">1.</span> Nosso site permanece como interface de vendas, campanhas e relatórios.</p>
+<p><span class="step">2.</span> O Render envia solicitações autenticadas à operadora sem expor tokens dos vendedores.</p>
+<p><span class="step">3.</span> Para uma primeira ligação real sem Asterisk, a API da Directcall pode chamar o celular do vendedor e depois o cliente. Isso exige habilitação da API, credenciais e cobrança da operadora.</p>
+<p><span class="step">4.</span> Para áudio pelo headset do navegador, homologamos a modalidade WebRTC do aplicativo web da Directcall, sem presumir que está liberada na conta atual.</p>
+<p><a href="https://docs.api.directcall.com.br/wiki/spaces/directcallphoneapp/pages/1114260" target="_blank" rel="noopener noreferrer">Documentação oficial — aplicativo Directcall para sites</a></p>
+</section><p class="foot">Ambiente de diagnóstico. Este laboratório não substitui o site principal e não afirma que uma chamada real foi completada.</p>
+<script>
+"use strict";
+async function update(){const el=document.getElementById("motor"),api=document.getElementById("api");el.textContent="Verificando…";api.textContent="Verificando…";try{const r=await fetch("/api/public/status",{cache:"no-store"});if(!r.ok)throw Error("HTTP "+r.status);const d=await r.json();el.textContent=d.ready?"Online":"Indisponível";el.className=d.ready?"good":"bad";api.textContent=d.version||"Resposta recebida";api.className="good";}catch{el.textContent="Sem resposta";el.className="bad";api.textContent="Indisponível";api.className="bad";}}
+document.getElementById("refresh").addEventListener("click",update);
+document.getElementById("mic").addEventListener("click",async function(){const el=document.getElementById("mic-result");if(!navigator.mediaDevices?.getUserMedia){el.textContent="Este navegador não disponibilizou captura de áudio por HTTPS.";return;}let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});const tracks=stream.getAudioTracks();el.textContent=tracks.length?"Microfone autorizado e detectado. Próxima etapa: conexão WebRTC da operadora.":"Nenhuma faixa de áudio disponível.";}catch(err){el.textContent="Não foi possível abrir o microfone ("+(err.name||"erro")+"). Confira permissões do navegador.";}finally{if(stream)stream.getTracks().forEach(track=>track.stop());}});
+update();
+</script></main></body></html>

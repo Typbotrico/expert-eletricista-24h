@@ -16,6 +16,13 @@ test('Servidor protegido e bloqueio de chamadas externas', async()=>{
  const port=server.address().port,api='http://127.0.0.1:'+port, auth={Authorization:'Bearer '+'x'.repeat(40)};
  try {
   let r=await fetch(api+'/health');let body=await r.json();assert.equal(body.external_calls_enabled,false);
+  r=await fetch(api+'/');assert.equal(r.status,200);
+  let html=await r.text();assert.ok(html.includes('Monitor de operação'));assert.ok(html.includes('Somente leitura')||html.includes('somente leitura'));
+  assert.equal(html.includes('5524999999999'),false);
+  r=await fetch(api+'/api/public/status');assert.equal(r.status,200);
+  let summary=await r.json();assert.equal(summary.external_calls_enabled,false);
+  assert.equal(summary.site_original_integrated,false);assert.equal('phone' in summary,false);
+  assert.equal(JSON.stringify(summary).includes('5524999999999'),false);
   r=await fetch(api+'/api/campaigns');assert.equal(r.status,401);
   r=await fetch(api+'/api/campaigns',{headers:auth});assert.equal(r.status,200);
   r=await fetch(api+'/api/campaign/start',{method:'POST',headers:auth});assert.equal(r.status,423);

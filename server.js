@@ -69,6 +69,16 @@ function createMotor({adminToken,agentToken,store,backup={selected:'',campaigns:
  const server=http.createServer(async(req,res)=>{
   const path=new URL(req.url,'http://localhost').pathname;
   if(req.method==='GET'&&(path==='/health'||path==='/api/public/status'))return reply(res,ready&&storageHealthy?200:503,status());
+  if(req.method==='GET'&&path==='/laboratorio-telefonia'){
+   const html=require('node:fs').readFileSync(require('node:path').join(__dirname,'telephony-lab.html'),'utf8');
+   res.writeHead(200,{
+    'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store',
+    'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY',
+    'Permissions-Policy':'microphone=(self), camera=()',
+    'Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+   });return res.end(html);
+  }
+
   if(req.method==='GET'&&path==='/'){
    const html=DASHBOARD_HTML.replace('Os resultados do piloto são temporários e podem desaparecer após reinício do servidor.','Fila e resultados do motor são persistidos no banco da Central original.').replace("d.last_internal_result.outcome","d.last_internal_result.outcome");
    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",'X-Frame-Options':'DENY'});return res.end(html);

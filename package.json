@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test_server.js"
+    "test": "node --test test_server.js test_directcall_pilot.js"
   },
   "description": "Motor isolado de homologação, bloqueado para discagens externas"
 }

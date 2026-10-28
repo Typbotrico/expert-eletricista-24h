@@ -17,7 +17,7 @@ function start(state,id,key,policy,now,ready){
  if(current&&state.queue.some(j=>j.runId===current.id&&needsResult(j)))throw Error('aguardando_classificacao');
  if(state.runs.some(r=>r.status==='running'))throw Error('fila_ja_em_execucao');
  if(state.queue.some(ext.active))throw Error('ramal_reservado_ou_aguarde_15s');
- if(current){current.status='running';current.requestKeys=[...(current.requestKeys||[]),key].slice(-100);current.reason=null;current.resumedAt=new Date(now).toISOString();return {run:current,resumed:true};}
+ if(current){current.status='running';current.nextAt=now;current.requestKeys=[...(current.requestKeys||[]),key].slice(-100);current.reason=null;current.resumedAt=new Date(now).toISOString();return {run:current,resumed:true};}
  const seen=new Set(),entries=[];
  for(const p of c.contacts){const phone=normalize(p.phone);if(!seen.has(phone)&&eligible(state,c,p,policy)&&['Pendente','Não atendeu','Retornar'].includes(p.status)){seen.add(phone);entries.push({contactId:p.id,phone,attempts:0,nextAt:0});}}
  if(!entries.length)throw Error('nenhum_contato_autorizado_pendente');
@@ -34,13 +34,14 @@ function next(state,policy,now){
   const p=c.contacts.find(p=>p.id===entry.contactId&&normalize(p.phone)===entry.phone);
   if(!eligible(state,c,p,policy)){entry.skipped=true;entry.reason='bloqueado_ou_removido';continue;}
   if(p.callbackAt&&Number.isFinite(Date.parse(p.callbackAt))&&Date.parse(p.callbackAt)>now){entry.nextAt=Date.parse(p.callbackAt);continue;}
+  if(p.callbackAt&&Date.parse(p.callbackAt)<=now&&entry.attempts===0)entry.nextAt=0;
   if(entry.attempts>=run.maxAttempts||entry.nextAt>now||entry.done)continue;
   entry.attempts++;entry.inFlight=true;
   const job={id:crypto.randomUUID(),key:run.id+'-'+entry.contactId+'-'+entry.attempts,kind:'campaign_call',state:'queued',phase:'reserved',createdAt:new Date(now).toISOString(),createdMs:now,campaignId:c.id,runId:run.id,contactId:p.id,contactName:p.name,phoneMasked:'••••'+entry.phone.slice(-4),targetPhone:entry.phone,channel:'PJSIP/1001',maxSeconds:180,events:[],lastSeq:0};
   state.queue.push(job);state.queue=state.queue.slice(-500);return job;
  }
  if(run.entries.every(e=>e.skipped||e.done||e.attempts>=run.maxAttempts)){run.status='completed';run.finishedAt=new Date(now).toISOString();}
- else{const due=run.entries.filter(e=>!e.skipped&&!e.done&&e.attempts<run.maxAttempts).map(e=>e.nextAt);if(due.length)run.nextAt=Math.max(now,Math.min(...due));}
+ else{const due=run.entries.filter(e=>!e.skipped&&!e.done&&e.attempts<run.maxAttempts).map(e=>e.nextAt);if(due.length)run.nextAt=Math.max(now,Math.min(now+60000,...due));}
  return null;
 }
 function finish(state,job,now){

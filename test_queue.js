@@ -14,6 +14,11 @@ test('a scheduled contact cannot be delivered early and source DNC still wins',(
  flow.start(state,'test-list','callback-round-key',policy,now,true);assert.equal(flow.next(state,policy,now),null);assert.equal(flow.next(state,policy,now+59999),null);
  state.backup.globalBlock=[phones[0]];assert.equal(flow.next(state,policy,now+60000).contactId,'c1');
 });
+test('rescheduling an untouched contact earlier is rechecked without waiting for the old date',()=>{
+ const now=Date.parse('2026-10-28T15:00:00Z'),state={backup:fixture(),queue:[]};state.backup.campaigns[0].contacts.forEach(p=>p.callbackAt=new Date(now+3600000).toISOString());
+ const {run}=flow.start(state,'test-list','reschedule-round-key',policy,now,true);assert.equal(flow.next(state,policy,now),null);assert.equal(run.nextAt,now+60000);
+ state.backup.campaigns[0].contacts[0].callbackAt=new Date(now+30000).toISOString();assert.equal(flow.next(state,policy,now+60000).contactId,'c0');
+});
 const admin='a'.repeat(64),agent='b'.repeat(64),policy=flow.makePolicy(phones);
 function fixture(){return {selected:'test-list',globalBlock:[],campaigns:[{id:'test-list',name:'Lista sintética',agents:1,lines:1,start:'09:00',end:'18:00',retryLimit:1,retryMinutes:60,history:[],block:[],contacts:phones.map((phone,i)=>({id:'c'+i,name:'Teste '+i,phone,status:'Pendente'}))}]};}
 async function setup(){let source=fixture(),saved=null,readFails=false,time=Date.parse('2026-10-28T15:00:00Z');const store={kind:'test',async load(){return structuredClone(saved)},async save(s){saved=structuredClone(s)},async readWorkspace(owner){if(readFails)throw Error('source offline');assert.equal(owner,'owner-test');return structuredClone(source)}};

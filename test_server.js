@@ -1,10 +1,9 @@
 'use strict';
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
 const {test}=require('node:test');
 process.env.CENTRAL_API_TOKEN='x'.repeat(40);
 const {server,parseBackup}=require('./server');
-const data=JSON.parse(fs.readFileSync(process.env.BACKUP_PATH||'/mnt/data/central-ligacoes.json','utf8'));
+const data={selected:'test',campaigns:[{id:'demo',name:'Demo',contacts:Array.from({length:8},(_,i)=>({id:'demo-'+i,phone:'552400000000'+i,status:'Pendente',demo:true,note:'Dado fictício'}))},{id:'test',name:'Teste autorizado',contacts:[{id:'only',name:'Teste',phone:'5524999999999',status:'Pendente'}]}]};
 test('Filtro conserva campanha real sem discar ficticios',()=>{
  const p=parseBackup(data);
  assert.equal(p.campaigns.length,2);

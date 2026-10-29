@@ -72,6 +72,7 @@ function createMotor({adminToken,agentToken,store,backup={selected:'',campaigns:
   transact:fn=>serial(async()=>{const next=copy(state);const out=await fn(next);await save(next);return out}),
   secret:process.env.CENTRAL_OPERATOR_SESSION_SECRET,
   setupKey:process.env.CENTRAL_OPERATOR_SETUP_KEY,
+  testPhones:testNumbers,
   now
  });
  const server=http.createServer(async(req,res)=>{

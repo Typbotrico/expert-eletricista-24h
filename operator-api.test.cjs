@@ -40,3 +40,25 @@ test('shared campaigns prevent duplicate calls, preserve blocked numbers, and re
  r=await h.call('/api/operator/claim','POST',{campaignId:id},cookie);assert.equal(r.body.contact.name,'Bruno');
  assert.equal((await h.call('/api/operator/export','GET',null,cookie)).status,200);
 });
+
+test('explicitly authorised own-number Directcall tests work after hours but remain paused by default',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ assert.equal((await h.call('/api/operator/self-test','POST',{name:'Celular próprio',phone:'24999998888',owned:false},cookie)).status,422);
+ const created=await h.call('/api/operator/self-test','POST',{name:'Celular próprio',phone:'24999998888',owned:true},cookie);
+ assert.equal(created.status,201);assert.equal(created.body.campaign.paused,true);
+ assert.equal(created.body.campaign.isTest,true);
+ const id=created.body.campaign.id;
+ h.advance(10*3600000);
+ assert.equal((await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).status,409);
+ await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);
+ const reserved=await h.call('/api/operator/claim','POST',{campaignId:id},cookie);
+ assert.equal(reserved.status,200);assert.equal(reserved.body.contact.phone,'5524999998888');
+ const dial=await h.call('/api/operator/dial','POST',{contactId:reserved.body.contact.id},cookie,'selftest-key-123456789');
+ assert.equal(dial.status,200);assert.equal(dial.body.contact.status,'Comando enviado');
+ assert.equal((await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).status,409);
+ const ended=await h.call('/api/operator/finish','POST',{contactId:reserved.body.contact.id,ended:true,result:'Não atendeu'},cookie);
+ assert.equal(ended.status,200);
+ assert.equal((await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).status,409);
+});

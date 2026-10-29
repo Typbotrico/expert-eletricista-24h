@@ -2,7 +2,7 @@
 const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
-function createOperatorApi({getState,transact,secret,setupKey,now=()=>Date.now()}){
+function createOperatorApi({getState,transact,secret,setupKey,testPhones=[],now=()=>Date.now()}){
  const attempts=new Map();
  const empty=()=>({users:[],campaigns:[],contacts:[],blocked:[],events:[],revision:0});
  const data=()=>getState()?.operatorV1||empty();
@@ -28,6 +28,8 @@ function createOperatorApi({getState,transact,secret,setupKey,now=()=>Date.now()
  const csvRows=t=>{const out=[];let row=[],item='',quoted=false;const delim=((t.split(/\r?\n/,1)[0].match(/;/g)||[]).length>=(t.split(/\r?\n/,1)[0].match(/,/g)||[]).length)?';':',';for(let i=0;i<t.length;i++){const c=t[i];if(c==='"'){if(quoted&&t[i+1]==='"'){item+='"';i++}else quoted=!quoted}else if(c===delim&&!quoted){row.push(item.trim());item=''}else if((c==='\r'||c==='\n')&&!quoted){row.push(item.trim());if(row.some(Boolean))out.push(row);row=[];item='';if(c==='\r'&&t[i+1]==='\n')i++}else item+=c}row.push(item.trim());if(row.some(Boolean))out.push(row);return out};
  const importRows=text=>{let rows=csvRows(safe(text).slice(0,400000));if(rows.length===1&&rows[0].length===1)rows=safe(text).split(/\r?\n/).filter(Boolean).map(r=>r.split(/\s{2,}/));const h=rows[0]?.map(v=>normal(v).replace(/[^a-z]/g,''))||[];const a=h.findIndex(x=>['nome','cliente','contato','name'].includes(x)),b=h.findIndex(x=>['telefone','celular','fone','numero','phone'].includes(x));if(a>=0&&b>=0)rows=rows.slice(1).map(r=>[r[a],r[b]]);return rows};
  const results=new Set(['Atendeu','Não atendeu','Ocupado','Retornar','Sem interesse','Não ligar']);
+ const allowTests=new Set(testPhones.map(phone).filter(Boolean));
+ const canCall=(campaign,c)=>during()||(campaign?.isTest===true&&allowTests.has(c?.phone));
  const during=()=>{const day=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now());const hour=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now());return !['Sat','Sun'].includes(day)&&hour>='09:00'&&hour<'18:00'};
  const change=(s,c,actor,status,action)=>{c.status=status;log(s,actor,action,c.id)};
  async function handle(req,res,pathname){
@@ -63,7 +65,7 @@ function createOperatorApi({getState,transact,secret,setupKey,now=()=>Date.now()
   if(pathname==='/api/operator/campaign'&&req.method==='POST'){
    if(actor.role!=='admin')return fail(res,403,'somente_admin');
    const b=await parse(req);if(!safe(b.name).trim())return fail(res,422,'nome_obrigatorio');
-   const c=await transactData(async d=>{const c={id:crypto.randomUUID(),name:safe(b.name).trim().slice(0,80),paused:true,createdAt:clock()};d.campaigns.push(c);log(d,actor.id,'campanha_criada');return c});return answer(res,201,{campaign:c});
+   const c=await transactData(async d=>{const c={id:crypto.randomUUID(),name:safe(b.name).trim().slice(0,80),paused:true,isTest:b.isTest===true,createdAt:clock()};d.campaigns.push(c);log(d,actor.id,'campanha_criada');return c});return answer(res,201,{campaign:c});
   }
   if(pathname==='/api/operator/import'&&req.method==='POST'){
    if(actor.role!=='admin')return fail(res,403,'somente_admin');
@@ -75,13 +77,13 @@ function createOperatorApi({getState,transact,secret,setupKey,now=()=>Date.now()
    const b=await parse(req);const c=await transactData(async d=>{const c=d.campaigns.find(x=>x.id===b.campaignId);if(!c)throw Error('campanha_nao_encontrada');c.paused=!!b.paused;log(d,actor.id,c.paused?'campanha_pausada':'campanha_reativada');return c});return answer(res,200,{campaign:c});
   }
   if(pathname==='/api/operator/claim'&&req.method==='POST'){
-   const b=await parse(req);if(!during())return fail(res,423,'fora_do_expediente_09_18_seg_a_sex');
+   const b=await parse(req);
    const active=data().contacts.find(c=>c.owner===actor.id&&['Reservado','Comando enviado','Resultado desconhecido'].includes(c.status));if(active)return fail(res,409,'ha_contato_em_andamento');
-   const c=await transactData(async d=>{const camp=d.campaigns.find(x=>x.id===b.campaignId);if(!camp||camp.paused)throw Error('campanha_indisponivel_ou_pausada');const c=d.contacts.find(x=>x.campaignId===camp.id&&!d.blocked.includes(x.phone)&&(x.status==='Pendente'||(x.status==='Retornar'&&x.callbackAt&&Date.parse(x.callbackAt)<=now()&&x.attempts<3)));if(!c)throw Error('lista_sem_contatos_pendentes');c.owner=actor.id;c.reservedAt=clock();change(d,c,actor.id,'Reservado','contato_reservado');return cleanContact(c)});return answer(res,200,{contact:c});
+   const c=await transactData(async d=>{const camp=d.campaigns.find(x=>x.id===b.campaignId);if(!camp||camp.paused)throw Error('campanha_indisponivel_ou_pausada');const c=d.contacts.find(x=>x.campaignId===camp.id&&canCall(camp,x)&&!d.blocked.includes(x.phone)&&(x.status==='Pendente'||(x.status==='Retornar'&&x.callbackAt&&Date.parse(x.callbackAt)<=now()&&x.attempts<3)));if(!c)throw Error('lista_sem_contatos_pendentes');c.owner=actor.id;c.reservedAt=clock();change(d,c,actor.id,'Reservado','contato_reservado');return cleanContact(c)});return answer(res,200,{contact:c});
   }
   if(pathname==='/api/operator/dial'&&req.method==='POST'){
    const b=await parse(req),key=safe(req.headers['idempotency-key']);if(!/^[A-Za-z0-9_-]{16,100}$/.test(key))return fail(res,422,'chave_de_operacao_obrigatoria');
-   const c=await transactData(async d=>{const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id);if(!c)throw Error('contato_nao_reservado');if(c.lastKey===key)return cleanContact(c);if(c.status!=='Reservado'||c.attempts>=3)throw Error('ligacao_ja_solicitada_ou_limite_atingido');const camp=d.campaigns.find(x=>x.id===c.campaignId);if(!camp||camp.paused||!during()||d.blocked.includes(c.phone))throw Error('discagem_bloqueada');c.attempts++;c.lastKey=key;c.requestedAt=clock();change(d,c,actor.id,'Comando enviado','solicitacao_reservada');return cleanContact(c)});return answer(res,200,{contact:c,meaning:'Permissao para enviar ao APP; NAO comprova chamada ou atendimento.'});
+   const c=await transactData(async d=>{const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id);if(!c)throw Error('contato_nao_reservado');if(c.lastKey===key)return cleanContact(c);if(c.status!=='Reservado'||c.attempts>=3)throw Error('ligacao_ja_solicitada_ou_limite_atingido');const camp=d.campaigns.find(x=>x.id===c.campaignId);if(!camp||camp.paused||!canCall(camp,c)||d.blocked.includes(c.phone))throw Error('discagem_bloqueada');c.attempts++;c.lastKey=key;c.requestedAt=clock();change(d,c,actor.id,'Comando enviado','solicitacao_reservada');return cleanContact(c)});return answer(res,200,{contact:c,meaning:'Permissao para enviar ao APP; NAO comprova chamada ou atendimento.'});
   }
   if(pathname==='/api/operator/unknown'&&req.method==='POST'){
    const b=await parse(req);const c=await transactData(async d=>{const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&x.status==='Comando enviado');if(!c)throw Error('solicitacao_nao_encontrada');change(d,c,actor.id,'Resultado desconhecido','comando_nao_confirmado');return cleanContact(c)});return answer(res,200,{contact:c});

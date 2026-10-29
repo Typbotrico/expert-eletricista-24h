@@ -57,7 +57,7 @@ test('explicitly authorised own-number Directcall tests work after hours but rem
  assert.equal(reserved.status,200);assert.equal(reserved.body.contact.phone,'5524999998888');
  const dial=await h.call('/api/operator/dial','POST',{contactId:reserved.body.contact.id},cookie,'selftest-key-123456789');
  assert.equal(dial.status,200);assert.equal(dial.body.contact.status,'Comando enviado');
- await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/ha_contato_em_andamento/);
+ assert.equal((await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).status,409);
  const ended=await h.call('/api/operator/finish','POST',{contactId:reserved.body.contact.id,ended:true,result:'Não atendeu'},cookie);
  assert.equal(ended.status,200);
  await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/lista_sem_contatos_pendentes/);

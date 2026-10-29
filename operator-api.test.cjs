@@ -51,14 +51,14 @@ test('explicitly authorised own-number Directcall tests work after hours but rem
  assert.equal(created.body.campaign.isTest,true);
  const id=created.body.campaign.id;
  h.advance(10*3600000);
- assert.equal((await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).status,409);
+ await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/campanha_indisponivel_ou_pausada/);
  await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);
  const reserved=await h.call('/api/operator/claim','POST',{campaignId:id},cookie);
  assert.equal(reserved.status,200);assert.equal(reserved.body.contact.phone,'5524999998888');
  const dial=await h.call('/api/operator/dial','POST',{contactId:reserved.body.contact.id},cookie,'selftest-key-123456789');
  assert.equal(dial.status,200);assert.equal(dial.body.contact.status,'Comando enviado');
- assert.equal((await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).status,409);
+ await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/ha_contato_em_andamento/);
  const ended=await h.call('/api/operator/finish','POST',{contactId:reserved.body.contact.id,ended:true,result:'Não atendeu'},cookie);
  assert.equal(ended.status,200);
- assert.equal((await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).status,409);
+ await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/lista_sem_contatos_pendentes/);
 });

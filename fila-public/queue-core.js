@@ -1,0 +1,31 @@
+/* Central de Ligações — regras puras da fila. Não executa telefonia. */
+(function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.QueueCore=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
+'use strict';
+const MAX_CONTACTS=3000;
+const RESULTS=['Atendeu','Não atendeu','Ocupado','Retornar','Sem interesse','Não ligar'];
+const now=()=>new Date().toISOString();
+function phone(value){let x=String(value||'').replace(/\D/g,'');if(x.length===10||x.length===11)x='55'+x;return /^55[1-9]\d(?:\d{8}|\d{9})$/.test(x)?x:null;}
+function parseCsv(text){const result=[];let fields=[],field='',quoted=false;const data=String(text||'').replace(/^\ufeff/,'');const delimiter=(data.split(/\r?\n/,1)[0].match(/;/g)||[]).length>=(data.split(/\r?\n/,1)[0].match(/,/g)||[]).length?';':',';
+for(let i=0;i<data.length;i++){const c=data[i];if(c==='"'){if(quoted&&data[i+1]==='"'){field+='"';i++;}else quoted=!quoted;}else if(c===delimiter&&!quoted){fields.push(field);field='';}else if((c==='\n'||c==='\r')&&!quoted){fields.push(field);if(fields.some(x=>x.trim()))result.push(fields.map(x=>x.trim()));fields=[];field='';if(c==='\r'&&data[i+1]==='\n')i++;}else field+=c;}
+fields.push(field);if(fields.some(x=>x.trim()))result.push(fields.map(x=>x.trim()));return result;
+}
+function parseRows(text){const lines=String(text||'').split(/\r?\n/),first=lines.find(x=>x.trim())||'';let rows;
+if(first.includes('\t'))rows=lines.filter(Boolean).map(x=>x.split('\t').map(y=>y.trim()));else if(first.includes(';')||(first.match(/,/g)||[]).length>=1)rows=parseCsv(text);else rows=lines.filter(Boolean).map(x=>x.split(/\s{2,}/));
+if(!rows.length)return [];
+const normalizeHeader=x=>String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z]/g,'');
+const header=rows[0].map(normalizeHeader),ni=header.findIndex(x=>/^(nome|contato|cliente|name)$/.test(x)),pi=header.findIndex(x=>/^(telefone|celular|fone|phone|numero)$/.test(x));
+return ni>=0&&pi>=0?rows.slice(1).map(r=>[r[ni],r[pi]]):rows;
+}
+const fresh=()=>({version:2,contacts:[],blocked:[],activeId:null,paused:false,lastDialAt:null});
+function sanitizeState(value){if(!value||value.version!==2||!Array.isArray(value.contacts))return fresh();const contacts=[];const seen=new Set();for(const x of value.contacts.slice(0,MAX_CONTACTS)){let p=phone(x.phone);if(!p||seen.has(p))continue;seen.add(p);contacts.push({id:String(x.id||'').slice(0,90)||crypto.randomUUID(),name:String(x.name||'Contato').slice(0,100),phone:p,status:String(x.status||'Pendente').slice(0,50),notes:String(x.notes||'').slice(0,1000),attempts:Math.min(9,Math.max(0,Number(x.attempts)||0)),requestedAt:x.requestedAt||null,finishedAt:x.finishedAt||null,callbackAt:x.callbackAt||null});}let activeId=contacts.some(x=>x.id===value.activeId)?value.activeId:null;return {version:2,contacts,blocked:[...new Set((value.blocked||[]).map(phone).filter(Boolean))],activeId,paused:!!value.paused,lastDialAt:value.lastDialAt||null};}
+function add(state,raw){let created=0,duplicate=0,invalid=0,blocked=0;const exists=new Set(state.contacts.map(x=>x.phone));const blocks=new Set(state.blocked);for(const r of parseRows(raw).slice(0,MAX_CONTACTS+20)){const name=String(r[0]||'').trim().slice(0,100),p=phone(r[1]);if(!p||!name){invalid++;continue}if(blocks.has(p)){blocked++;continue}if(exists.has(p)){duplicate++;continue}if(state.contacts.length>=MAX_CONTACTS){invalid++;continue}state.contacts.push({id:crypto.randomUUID(),name,phone:p,status:'Pendente',notes:'',attempts:0,requestedAt:null,finishedAt:null,callbackAt:null});exists.add(p);created++;}return {created,duplicate,invalid,blocked};}
+function eligible(state,at=new Date()){return state.contacts.find(c=>c.status==='Pendente'&&!state.blocked.includes(c.phone)&&(!c.callbackAt||new Date(c.callbackAt)<=at))||null;}
+function reserve(state){if(state.paused||state.activeId)return null;const c=eligible(state);if(!c)return null;c.status='Em foco';state.activeId=c.id;return c;}
+function active(state){return state.contacts.find(c=>c.id===state.activeId)||null;}
+function requestCall(state,at=now()){const c=active(state);if(!c||state.paused||c.status!=='Em foco'||state.blocked.includes(c.phone)||c.attempts>0)return null;c.status='Comando enviado';c.attempts++;c.requestedAt=at;state.lastDialAt=at;return c;}
+function classify(state,result,notes='',callbackAt=null,endedConfirmed=false){const c=active(state);if(!c||!RESULTS.includes(result))throw Error('Selecione um resultado válido.');if(c.status==='Comando enviado'&&!endedConfirmed)throw Error('Confirme que a chamada terminou no Directcall.');if(c.status!=='Em foco'&&c.status!=='Comando enviado')throw Error('Contato não está em atendimento.');if(result==='Retornar'){if(!callbackAt||!Number.isFinite(new Date(callbackAt).getTime())||new Date(callbackAt)<=new Date())throw Error('Escolha uma data futura para retorno.');}c.status=result;c.notes=String(notes).slice(0,1000);c.finishedAt=now();c.callbackAt=result==='Retornar'?new Date(callbackAt).toISOString():null;if(result==='Não ligar'&&!state.blocked.includes(c.phone))state.blocked.push(c.phone);state.activeId=null;return c;}
+function skip(state){const c=active(state);if(!c||c.status!=='Em foco')throw Error('Não é seguro pular após solicitar ligação.');c.status='Pulado';c.finishedAt=now();state.activeId=null;return c;}
+function totals(s){return {total:s.contacts.length,pending:s.contacts.filter(c=>c.status==='Pendente').length,finished:s.contacts.filter(c=>!['Pendente','Em foco','Comando enviado','Não ligar'].includes(c.status)).length,blocked:s.blocked.length};}
+function csv(s){const q=x=>'"'+String(x??'').replaceAll('"','""')+'"';return '\ufeff'+[['Nome','Telefone','Status','Tentativas','Notas','Data chamada','Data resultado','Retorno'].map(q).join(';'),...s.contacts.map(c=>[c.name,c.phone,c.status,c.attempts,c.notes,c.requestedAt,c.finishedAt,c.callbackAt].map(q).join(';'))].join('\r\n');}
+return {phone,parseCsv,parseRows,fresh,sanitizeState,add,eligible,reserve,active,requestCall,classify,skip,totals,csv,RESULTS};
+});

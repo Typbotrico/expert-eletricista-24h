@@ -236,6 +236,13 @@ function createMotor({adminToken,agentToken,store,backup={selected:'',campaigns:
  return {server,init,status};
 }
 if(require.main===module){
+ if(process.env.CENTRAL_OPERATOR_VERIFY_ON_START==='1'){
+  const {spawnSync}=require('node:child_process');
+  const check=spawnSync(process.execPath,['--test','operator-api.test.cjs'],{encoding:'utf8',timeout:30000});
+  if(check.status!==0){console.error('Central: teste de segurança do discador reprovado. Deploy abortado.',String(check.stderr||check.stdout).slice(0,2400));process.exit(1)}
+  console.log('Central: testes automatizados do discador aprovados.');
+ }
+
  const store=remoteStore({url:process.env.CENTRAL_STORAGE_URL,token:process.env.CENTRAL_STORAGE_TOKEN,siteToken:process.env.CENTRAL_SITE_ACCESS_TOKEN});
  let backup={selected:'',campaigns:[],globalBlock:[]};if(process.env.CENTRAL_BACKUP_B64)backup=JSON.parse(Buffer.from(process.env.CENTRAL_BACKUP_B64,'base64').toString());
  const motor=createMotor({adminToken:process.env.CENTRAL_ADMIN_TOKEN,agentToken:process.env.CENTRAL_AGENT_TOKEN,store,backup,testNumbers:JSON.parse(process.env.CENTRAL_TEST_NUMBERS||'[]')});

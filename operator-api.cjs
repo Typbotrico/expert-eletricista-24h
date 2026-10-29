@@ -29,7 +29,7 @@ function createOperatorApi({getState,transact,secret,setupKey,testPhones=[],now=
  const importRows=text=>{let rows=csvRows(safe(text).slice(0,400000));if(rows.length===1&&rows[0].length===1)rows=safe(text).split(/\r?\n/).filter(Boolean).map(r=>r.split(/\s{2,}/));const h=rows[0]?.map(v=>normal(v).replace(/[^a-z]/g,''))||[];const a=h.findIndex(x=>['nome','cliente','contato','name'].includes(x)),b=h.findIndex(x=>['telefone','celular','fone','numero','phone'].includes(x));if(a>=0&&b>=0)rows=rows.slice(1).map(r=>[r[a],r[b]]);return rows};
  const results=new Set(['Atendeu','Não atendeu','Ocupado','Retornar','Sem interesse','Não ligar']);
  const allowTests=new Set(testPhones.map(phone).filter(Boolean));
- const canCall=(campaign,c)=>during()||(campaign?.isTest===true&&allowTests.has(c?.phone));
+ const canCall=(campaign,c)=>during()||(campaign?.isTest===true&&(allowTests.has(c?.phone)||data().testPhonesAuthorized?.includes(c?.phone)));
  const during=()=>{const day=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now());const hour=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now());return !['Sat','Sun'].includes(day)&&hour>='09:00'&&hour<'18:00'};
  const change=(s,c,actor,status,action)=>{c.status=status;log(s,actor,action,c.id)};
  async function handle(req,res,pathname){
@@ -61,6 +61,25 @@ function createOperatorApi({getState,transact,secret,setupKey,testPhones=[],now=
    const b=await parse(req),username=normal(b.username),pass=safe(b.password);if(!/^[a-z0-9._-]{3,30}$/.test(username)||pass.length<12||pass.length>128||!safe(b.name).trim())return fail(res,422,'usuario_nome_senha_invalidos');
    const u=await transactData(async d=>{if(d.users.length>=5)throw Error('limite_quatro_operadores');if(d.users.some(u=>u.username===username))throw Error('usuario_duplicado');const salt=crypto.randomBytes(16).toString('hex');const item={id:crypto.randomUUID(),username,name:safe(b.name).trim().slice(0,70),salt,hash:hashPass(pass,salt),role:'agent'};d.users.push(item);log(d,actor.id,'operador_criado');return basicUser(item)});
    return answer(res,201,{user:u});
+  }
+  if(pathname==='/api/operator/self-test'&&req.method==='POST'){
+   if(actor.role!=='admin')return fail(res,403,'somente_admin');
+   const b=await parse(req),p=phone(b.phone),name=safe(b.name).trim().slice(0,90);
+   if(!p||!name||b.owned!==true)return fail(res,422,'nome_telefone_e_confirmacao_de_autorizacao_obrigatorios');
+   const v=await transactData(async d=>{
+    d.testPhonesAuthorized||=[];
+    const existing=d.contacts.find(c=>c.phone===p);
+    if(existing){const camp=d.campaigns.find(x=>x.id===existing.campaignId);if(camp?.isTest)return {campaign:camp,contact:cleanContact(existing),alreadyExists:true};throw Error('numero_ja_cadastrado_em_outra_campanha')}
+    if(d.testPhonesAuthorized.length>=2&&!d.testPhonesAuthorized.includes(p))throw Error('limite_de_dois_numeros_de_teste');
+    if(d.blocked.includes(p))throw Error('numero_bloqueado_nao_ligar');
+    if(d.testPhonesAuthorized.indexOf(p)<0)d.testPhonesAuthorized.push(p);
+    const camp={id:crypto.randomUUID(),name:'Teste Directcall — '+name,paused:true,isTest:true,createdAt:clock()};
+    const c={id:crypto.randomUUID(),campaignId:camp.id,name,phone:p,status:'Pendente',attempts:0,owner:null,requestedAt:null,finishedAt:null,callbackAt:null,notes:'Teste autorizado pelo administrador',result:null};
+    d.campaigns.push(camp);d.contacts.push(c);
+    log(d,actor.id,'numero_pessoal_de_teste_autorizado',c.id);
+    return {campaign:camp,contact:cleanContact(c),alreadyExists:false}
+   });
+   return answer(res,201,v)
   }
   if(pathname==='/api/operator/campaign'&&req.method==='POST'){
    if(actor.role!=='admin')return fail(res,403,'somente_admin');

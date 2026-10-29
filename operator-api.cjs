@@ -48,7 +48,7 @@ function createOperatorApi({getState,transact,secret,setupKey,now=()=>Date.now()
   }
   if(pathname==='/api/operator/login'&&req.method==='POST'){
    if(!rate(req))return fail(res,429,'muitas_tentativas');
-   const b=await parse(req),u=data().users.find(x=>x.username===normal(b.username));if(!u||!equals(hashPass(safe(b.password),u.salt),u.hash))return fail(res,401,'usuario_ou_senha_invalidos');
+   const b=await parse(req);if(safe(b.password).length>128||safe(b.username).length>80)return fail(res,401,'usuario_ou_senha_invalidos');const u=data().users.find(x=>x.username===normal(b.username));if(!u||!equals(hashPass(safe(b.password),u.salt),u.hash))return fail(res,401,'usuario_ou_senha_invalidos');
    return answer(res,200,{user:basicUser(u)},{'Set-Cookie':'central_operator_session='+signin(u)+'; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200'});
   }
   if(pathname==='/api/operator/logout'&&req.method==='POST')return answer(res,200,{ok:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});

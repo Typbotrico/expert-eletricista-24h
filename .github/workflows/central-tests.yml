@@ -1,0 +1,19 @@
+name: Central de Ligacoes - Testes do Discador
+on:
+  push:
+    branches: [central-ligacoes-motor-piloto]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check operator-api.cjs
+      - run: node --check server.js
+      - run: node --check operador.js
+      - run: node --test operator-api.test.cjs test_server.js test_directcall_pilot.js test_queue.js

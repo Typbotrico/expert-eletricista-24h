@@ -7,7 +7,7 @@ function harness(){
  let whole={};let time=Date.parse('2026-10-28T15:00:00Z');
  const api=createOperatorApi({getState:()=>whole,transact:async fn=>{const next=structuredClone(whole);const result=await fn(next);whole=next;return result},secret:'S'.repeat(48),setupKey:'T'.repeat(40),now:()=>time});
  async function call(path,method='GET',data=null,cookie='',key=''){
-  const req=Readable.from(data==null?[]:[Buffer.from(JSON.stringify(data))]);req.headers={host:'test.local',cookie,origin:'https://test.local',...(key?{'idempotency-key':key}:{})};req.socket={remoteAddress:'127.0.0.1'};
+  const req=Readable.from(data==null?[]:[Buffer.from(JSON.stringify(data))]);req.method=method;req.headers={host:'test.local',cookie,origin:'https://test.local',...(key?{'idempotency-key':key}:{})};req.socket={remoteAddress:'127.0.0.1'};
   let status=null,headers={},body='';const res={headersSent:false,writeHead(code,extra){status=code;headers=extra;this.headersSent=true},end(value){body=String(value??'')}};
   await api.handle(req,res,path);return {status,headers,body:headers['Content-Type']?.includes('application/json')?JSON.parse(body):body};
  }

@@ -2,7 +2,7 @@
 const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
-function createOperatorApi({getState,transact,secret,setupKey,testPhones=[],now=()=>Date.now()}){
+function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,recoveryExpiresAt=0,testPhones=[],now=()=>Date.now()}){
  const attempts=new Map();
  const empty=()=>({users:[],campaigns:[],contacts:[],blocked:[],events:[],revision:0});
  const data=()=>getState()?.operatorV1||empty();
@@ -17,8 +17,8 @@ function createOperatorApi({getState,transact,secret,setupKey,testPhones=[],now=
  const clock=()=>new Date(now()).toISOString();
  const log=(s,actor,type,contact)=>{s.events.push({at:clock(),actor,type,contact:contact||null});s.events=s.events.slice(-2000)};
  const cookie=(req)=>{const m=(req.headers.cookie||'').match(/(?:^|;\s*)central_operator_session=([^;]+)/);return m?m[1]:''};
- const signin=(u)=>{const body=Buffer.from(JSON.stringify({id:u.id,exp:now()+12*3600000})).toString('base64url');const mac=crypto.createHmac('sha256',secret).update(body).digest('base64url');return body+'.'+mac};
- const authenticated=(req)=>{try{if(!secret||secret.length<32)return null;const [raw,signature]=cookie(req).split('.');if(!raw||!equals(crypto.createHmac('sha256',secret).update(raw).digest('base64url'),signature))return null;const info=JSON.parse(Buffer.from(raw,'base64url').toString());if(info.exp<now())return null;return data().users.find(u=>u.id===info.id)||null}catch{return null}};
+ const signin=(u)=>{const body=Buffer.from(JSON.stringify({id:u.id,sv:u.sessionVersion||0,exp:now()+12*3600000})).toString('base64url');const mac=crypto.createHmac('sha256',secret).update(body).digest('base64url');return body+'.'+mac};
+ const authenticated=(req)=>{try{if(!secret||secret.length<32)return null;const [raw,signature]=cookie(req).split('.');if(!raw||!equals(crypto.createHmac('sha256',secret).update(raw).digest('base64url'),signature))return null;const info=JSON.parse(Buffer.from(raw,'base64url').toString());if(info.exp<now())return null;const u=data().users.find(x=>x.id===info.id)||null;return u&&(u.sessionVersion||0)===(info.sv||0)?u:null}catch{return null}};
  const basicUser=u=>({id:u.id,username:u.username,name:u.name,role:u.role});
  const cleanContact=c=>({id:c.id,campaignId:c.campaignId,name:c.name,phone:c.phone,status:c.status,attempts:c.attempts,owner:c.owner||null,requestedAt:c.requestedAt||null,finishedAt:c.finishedAt||null,callbackAt:c.callbackAt||null,notes:c.notes||'',result:c.result||null});
  const userView=u=>{const d=data(),own=d.contacts.find(c=>c.owner===u.id&&['Reservado','Comando enviado','Resultado desconhecido'].includes(c.status));return {user:basicUser(u),campaigns:d.campaigns,contacts:d.contacts.map(cleanContact),active:own?cleanContact(own):null,blocked:d.blocked.length,users:u.role==='admin'?d.users.map(basicUser):[],events:u.role==='admin'?d.events.slice(-100).reverse():[],revision:d.revision}};
@@ -47,6 +47,20 @@ function createOperatorApi({getState,transact,secret,setupKey,testPhones=[],now=
    const salt=crypto.randomBytes(16).toString('hex');
    const user=await transactData(async d=>{if(d.users.length)throw Error('configuracao_existente');const u={id:crypto.randomUUID(),username:'admin',name,role:'admin',salt,hash:hashPass(pass,salt)};d.users.push(u);log(d,u.id,'admin_configurado');return u});
    return answer(res,201,{user:basicUser(user)},{'Set-Cookie':'central_operator_session='+signin(user)+'; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200'});
+  }
+  if(pathname==='/api/operator/reset-password'&&req.method==='POST'){
+   if(!rate(req))return fail(res,429,'muitas_tentativas');
+   if(!recoveryToken||recoveryToken.length<48||!Number.isFinite(Number(recoveryExpiresAt))||now()>=Number(recoveryExpiresAt))return fail(res,403,'codigo_expirado_ou_indisponivel');
+   const b=await parse(req),candidate=safe(b.code),pass=safe(b.password);
+   if(pass.length<12||pass.length>128||candidate.length>160||!equals(candidate,recoveryToken))return fail(res,403,'codigo_invalido_ou_senha_fora_do_padrao');
+   const tokenFingerprint=crypto.createHash('sha256').update(recoveryToken).digest('hex');
+   const u=await transactData(async d=>{
+    if(d.recoveryUsed===tokenFingerprint)throw Error('codigo_ja_utilizado');
+    const admin=d.users.find(x=>x.role==='admin'&&x.username==='admin');if(!admin)throw Error('administrador_nao_encontrado');
+    const salt=crypto.randomBytes(16).toString('hex');admin.salt=salt;admin.hash=hashPass(pass,salt);admin.sessionVersion=(admin.sessionVersion||0)+1;
+    d.recoveryUsed=tokenFingerprint;log(d,admin.id,'senha_admin_redefinida');return basicUser(admin);
+   });
+   return answer(res,200,{user:u,reset:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
   }
   if(pathname==='/api/operator/login'&&req.method==='POST'){
    if(!rate(req))return fail(res,429,'muitas_tentativas');

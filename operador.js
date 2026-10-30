@@ -1,6 +1,6 @@
 'use strict';
 (()=>{const $=id=>document.getElementById(id),API='/api/operator/',KEY='central.operator.campaign.v1';
-let profile=null,view=null,campaignId='',sdkReady=false,sdkLoading=false,busy=false;
+let profile=null,view=null,campaignId='',sdkReady=false,sdkLoading=false,busy=false,sequencePaused=false;
 const status=(s,kind='')=>{const e=$('message');e.textContent=s;e.className='notice '+kind};
 const notice=(id,s,kind='')=>{const e=$(id);e.textContent=s;e.className='notice '+kind};
 const err=e=>e?.message||String(e);
@@ -20,6 +20,10 @@ $('currentInfo').textContent=c?'Situação: '+c.status+' · tentativas '+c.attem
 notice('queueStatus',c?.status==='Comando enviado'?'Solicitação reservada; aguarde encerramento confirmado.':c?.status==='Resultado desconhecido'?'O resultado do comando é desconhecido. Confira a operadora antes de finalizar.':c?'Contato reservado para você. Confirme o Directcall APP antes de ligar.':chosen?.paused?'Campanha pausada.':'Fila livre para reservar o próximo contato.',c?.status==='Resultado desconhecido'?'warn':'');
 $('next').disabled=busy||!chosen||chosen.paused||!!c;$('skip').disabled=busy||!c||c.status!=='Reservado';
 $('call').disabled=busy||!sdkReady||!c||c.status!=='Reservado'||chosen?.paused;$('finish').disabled=busy||!c;
+$('startQueue').disabled=busy||sequencePaused||!chosen||chosen.paused||!sdkReady||(!!c&&c.status!=='Reservado');
+$('finishAndDial').disabled=busy||sequencePaused||!sdkReady||!c||!chosen||chosen.paused||!$('ended').checked||!$('result').value;
+$('stopQueue').textContent=sequencePaused?'▶ Retomar novas chamadas':'⏸ Pausar novas chamadas';
+if(sequencePaused)notice('queueStatus','Fila pausada neste navegador. Finalize o contato atual antes de sair. Nenhuma nova chamada será solicitada.','warn');
 const t=$('rows');t.replaceChildren();for(const x of list.slice(0,1000)){const tr=document.createElement('tr');for(const value of [x.name,x.phone,x.status,x.attempts,x.owner?view.users.find(u=>u.id===x.owner)?.name||'Reservado':'—']){const td=document.createElement('td');td.textContent=String(value??'');tr.appendChild(td)}t.appendChild(tr);}
 }
 async function refresh(){view=await request('view');profile=view.user;const ids=new Set(view.campaigns.map(x=>x.id));if(!ids.has(campaignId)){campaignId=ids.has(localStorage.getItem(KEY))?localStorage.getItem(KEY):view.campaigns[0]?.id||''}$('auth').classList.add('hidden');$('dashboard').classList.add('ready');$('logout').classList.remove('hidden');show()}
@@ -50,9 +54,52 @@ $('testMic').onclick=async()=>{const b=$('testMic'),out=$('micState');b.disabled
 $('openPhone').onclick=async()=>{try{if(!sdkReady)await sdk();expandPhone();notice('sdkStatus','Telefone expandido. Entre com sua conta Directcall no APP e confirme “Via navegador”. O número da fila será enviado sem outra aba.','good')}catch(e){notice('sdkStatus','Não foi possível expandir: '+err(e)+'. Clique no ícone D na lateral direita.','warn')}};
 $('next').onclick=()=>action(async()=>{const r=await request('claim',{method:'POST',data:{campaignId}});status('Contato reservado: '+r.contact.name+'. Confira a Directcall antes de ligar.','good')});
 $('skip').onclick=()=>action(async()=>{const c=active();if(!c)return;await request('skip',{method:'POST',data:{contactId:c.id}});status('Contato pulado. Selecione o próximo.')});
-$('call').onclick=()=>action(async()=>{const c=active();if(!c||c.status!=='Reservado')return;const key=crypto.randomUUID().replaceAll('-','');await request('dial',{method:'POST',data:{contactId:c.id},key});try{sendProvider(c);status('Comando enviado ao Directcall APP. Aguarde a chamada real. Não significa que o cliente atendeu.','good')}catch(e){try{await request('unknown',{method:'POST',data:{contactId:c.id}})}catch{}throw Error('Envio não confirmado: '+err(e)+'. Confira no APP antes de qualquer nova tentativa.') }});
-$('result').onchange=()=>{$('returnBox').style.display=$('result').value==='Retornar'?'block':'none'};
-$('finish').onclick=()=>action(async()=>{const c=active();if(!c)throw Error('Nenhum contato selecionado');await request('finish',{method:'POST',data:{contactId:c.id,result:$('result').value,notes:$('notes').value,callbackAt:$('callbackAt').value,ended:$('ended').checked}});$('result').value='';$('notes').value='';$('callbackAt').value='';$('ended').checked=false;$('returnBox').style.display='none';try{if(campaignId)await request('claim',{method:'POST',data:{campaignId}});status('Resultado salvo e próximo contato reservado. Clique em Ligar para efetuar a próxima chamada.','good')}catch(e){status('Resultado salvo. '+err(e)+'; a próxima ligação não foi iniciada.','good')}});
+async function requestOneDial(c){
+ if(!c||c.status!=='Reservado')throw Error('Contato não disponível para nova ligação');
+ if(!sdkReady)throw Error('Abra o telefone da Directcall antes de iniciar a fila');
+ if(sequencePaused)throw Error('Fila pausada pelo operador');
+ const key=crypto.randomUUID().replaceAll('-','');
+ await request('dial',{method:'POST',data:{contactId:c.id},key});
+ try{sendProvider(c)}
+ catch(e){try{await request('unknown',{method:'POST',data:{contactId:c.id}})}catch{}throw Error('Não foi possível confirmar o envio. O contato ficou bloqueado para evitar outra discagem. Confira no APP. '+err(e))}
+ status('Ligação solicitada para '+c.name+' ('+c.phone+'). Aguarde no Directcall. Ao encerrar, marque o resultado e escolha Salvar e ligar próximo.','good');
+}
+async function beginQueueDial(){
+ if(sequencePaused)throw Error('A fila está pausada');
+ const chosen=view?.campaigns.find(x=>x.id===campaignId);
+ if(!chosen||chosen.paused)throw Error('Ative uma campanha com contatos antes de iniciar a fila');
+ if(!sdkReady)throw Error('Abra o Directcall APP e confirme Via navegador antes de iniciar');
+ let c=active();
+ if(c&&c.status!=='Reservado')throw Error('Já existe chamada em andamento ou com resultado desconhecido. Finalize-a primeiro.');
+ if(!c){const r=await request('claim',{method:'POST',data:{campaignId}});c=r.contact;}
+ await requestOneDial(c);
+}
+async function finishCurrent(dialNext){
+ const c=active();if(!c)throw Error('Não há contato em atendimento');
+ if(!$('ended').checked)throw Error('Primeiro encerre a ligação no Directcall e marque a confirmação');
+ if(!$('result').value)throw Error('Selecione o resultado desta ligação');
+ const callResult=$('result').value;
+ await request('finish',{method:'POST',data:{contactId:c.id,result:callResult,notes:$('notes').value,callbackAt:$('callbackAt').value,ended:true}});
+ $('result').value='';$('notes').value='';$('callbackAt').value='';$('ended').checked=false;$('returnBox').style.display='none';
+ // The previous call is committed before any next contact can be reserved or dialled.
+ if(sequencePaused||!campaignId){status('Resultado salvo. Fila pausada; nenhuma chamada nova foi iniciada.','good');return}
+ const chosen=view.campaigns.find(x=>x.id===campaignId);
+ if(!chosen||chosen.paused){status('Resultado salvo. Campanha pausada; não há próxima ligação.','good');return}
+ let reserved;
+ try{reserved=await request('claim',{method:'POST',data:{campaignId}})}
+ catch(e){status('Resultado de '+c.name+' salvo. Nenhum próximo contato foi reservado ('+err(e)+').','good');return}
+ if(!dialNext){status('Resultado salvo. Próximo contato: '+reserved.contact.name+'. Clique em Ligar quando estiver pronto.','good');return}
+ try{await requestOneDial(reserved.contact)}
+ catch(e){status('Resultado anterior salvo. Próximo contato reservado, mas não foi discado: '+err(e),'warn');return}
+ status('Resultado de '+c.name+' salvo. Próxima chamada solicitada para '+reserved.contact.name+'.','good');
+}
+$('stopQueue').onclick=()=>{sequencePaused=!sequencePaused;show();status(sequencePaused?'Novas chamadas pausadas neste computador. A ligação atual não é interrompida.':'Fila retomada. Clique em Iniciar fila e ligar ou em Salvar e ligar próximo após a chamada.','good')};
+$('startQueue').onclick=()=>action(beginQueueDial);
+$('call').onclick=()=>action(async()=>{const c=active();if(!c)throw Error('Reserve um contato primeiro');await requestOneDial(c)});
+$('result').onchange=()=>{$('returnBox').style.display=$('result').value==='Retornar'?'block':'none';show()};
+$('ended').onchange=()=>show();
+$('finish').onclick=()=>action(()=>finishCurrent(false));
+$('finishAndDial').onclick=()=>action(()=>finishCurrent(true));
 $('createSelfTest').onclick=()=>action(async()=>{if(!$('selfOwned').checked)throw Error('Confirme que o telefone é seu ou autorizado.');const r=await request('self-test',{method:'POST',data:{name:$('selfName').value,phone:$('selfPhone').value,owned:true}});campaignId=r.campaign.id;localStorage.setItem(KEY,campaignId);$('selfOwned').checked=false;notice('selfMessage','Teste criado para '+r.contact.name+'. Campanha pausada: use Pausar / retomar, depois Selecionar próximo contato e Ligar no Directcall. Apenas uma chamada será preparada.','good');status('Campanha de teste salva. Expanda o telefone e faça login no Directcall antes de iniciar a chamada.','good')});
 $('createCampaign').onclick=()=>action(async()=>{const r=await request('campaign',{method:'POST',data:{name:$('newCampaign').value,isTest:$('isTest').checked}});campaignId=r.campaign.id;$('newCampaign').value='';$('isTest').checked=false;status('Campanha criada e pausada. Importe contatos e ative-a.','good')});
 $('import').onclick=()=>action(async()=>{let text=$('contactsText').value;if($('csv').files[0]){if($('csv').files[0].size>390000)throw Error('Arquivo acima do limite');text=await $('csv').files[0].text()}if(!campaignId)throw Error('Selecione a campanha');const r=await request('import',{method:'POST',data:{campaignId,text}});$('importStatus').textContent=r.added+' adicionados · '+r.duplicates+' repetidos · '+r.invalid+' inválidos · '+r.blocked+' bloqueados';$('contactsText').value='';$('csv').value=''});

@@ -5,7 +5,7 @@ const {Readable}=require('node:stream');
 const {createOperatorApi}=require('./operator-api.cjs');
 function harness(){
  let whole={};let time=Date.parse('2026-10-28T15:00:00Z');
- const api=createOperatorApi({getState:()=>whole,transact:async fn=>{const next=structuredClone(whole);const result=await fn(next);whole=next;return result},secret:'S'.repeat(48),setupKey:'T'.repeat(40),now:()=>time});
+ const api=createOperatorApi({getState:()=>whole,transact:async fn=>{const next=structuredClone(whole);const result=await fn(next);whole=next;return result},secret:'S'.repeat(48),setupKey:'T'.repeat(40),recoveryToken:'R'.repeat(64),recoveryExpiresAt:time+7200000,now:()=>time});
  async function call(path,method='GET',data=null,cookie='',key=''){
   const req=Readable.from(data==null?[]:[Buffer.from(JSON.stringify(data))]);req.method=method;req.headers={host:'test.local',cookie,origin:'https://test.local',...(key?{'idempotency-key':key}:{})};req.socket={remoteAddress:'127.0.0.1'};
   let status=null,headers={},body='';const res={headersSent:false,writeHead(code,extra){status=code;headers=extra;this.headersSent=true},end(value){body=String(value??'')}};
@@ -61,4 +61,34 @@ test('explicitly authorised own-number Directcall tests work after hours but rem
  const ended=await h.call('/api/operator/finish','POST',{contactId:reserved.body.contact.id,ended:true,result:'Não atendeu'},cookie);
  assert.equal(ended.status,200);
  await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/lista_sem_contatos_pendentes/);
+});
+
+test('recovery resets only admin password, keeps data, revokes sessions and rejects reused code',async()=>{
+ const h=harness();
+ const a=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'OldStrongPass456!'});
+ assert.equal(a.status,201);
+ const cookie=a.headers['Set-Cookie'].split(';')[0];
+ const c=await h.call('/api/operator/campaign','POST',{name:'Campanha preservada'},cookie);
+ assert.equal(c.status,201);
+ let r=await h.call('/api/operator/reset-password','POST',{code:'errado',password:'NewStrongPass789!'});
+ assert.equal(r.status,403);
+ r=await h.call('/api/operator/reset-password','POST',{code:'R'.repeat(64),password:'NewStrongPass789!'});
+ assert.equal(r.status,200);
+ assert.equal((await h.call('/api/operator/view','GET',null,cookie)).status,401);
+ assert.equal((await h.call('/api/operator/login','POST',{username:'admin',password:'OldStrongPass456!'})).status,401);
+ const login=await h.call('/api/operator/login','POST',{username:'admin',password:'NewStrongPass789!'});
+ assert.equal(login.status,200);
+ const logged=login.headers['Set-Cookie'].split(';')[0];
+ const v=await h.call('/api/operator/view','GET',null,logged);
+ assert.equal(v.status,200);assert.equal(v.body.campaigns.length,1);assert.equal(v.body.campaigns[0].name,'Campanha preservada');
+ await assert.rejects(()=>h.call('/api/operator/reset-password','POST',{code:'R'.repeat(64),password:'AnotherStrongPass456!'}),/codigo_ja_utilizado/);
+});
+test('login has short cooldown only after failed passwords; successful login clears attempts',async()=>{
+ const h=harness();
+ await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'ValidStrongPass123!'});
+ for(let i=0;i<8;i++)assert.equal((await h.call('/api/operator/login','POST',{username:'admin',password:'errada'})).status,401);
+ assert.equal((await h.call('/api/operator/login','POST',{username:'admin',password:'ValidStrongPass123!'})).status,429);
+ h.advance(60001);
+ assert.equal((await h.call('/api/operator/login','POST',{username:'admin',password:'ValidStrongPass123!'})).status,200);
+ assert.equal((await h.call('/api/operator/login','POST',{username:'admin',password:'ValidStrongPass123!'})).status,200);
 });

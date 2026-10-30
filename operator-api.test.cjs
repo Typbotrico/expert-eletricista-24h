@@ -7,9 +7,9 @@ function harness(){
  let whole={};let time=Date.parse('2026-10-28T15:00:00Z');
  const api=createOperatorApi({getState:()=>whole,transact:async fn=>{const next=structuredClone(whole);const result=await fn(next);whole=next;return result},secret:'S'.repeat(48),setupKey:'T'.repeat(40),recoveryToken:'R'.repeat(64),recoveryExpiresAt:time+7200000,now:()=>time});
  async function call(path,method='GET',data=null,cookie='',key=''){
-  const req=Readable.from(data==null?[]:[Buffer.from(JSON.stringify(data))]);req.method=method;req.headers={host:'test.local',cookie,origin:'https://test.local',...(key?{'idempotency-key':key}:{})};req.socket={remoteAddress:'127.0.0.1'};
+  const req=Readable.from(data==null?[]:[Buffer.from(JSON.stringify(data))]);req.method=method;req.url=path;req.headers={host:'test.local',cookie,origin:'https://test.local',...(key?{'idempotency-key':key}:{})};req.socket={remoteAddress:'127.0.0.1'};
   let status=null,headers={},body='';const res={headersSent:false,writeHead(code,extra){status=code;headers=extra;this.headersSent=true},end(value){body=String(value??'')}};
-  await api.handle(req,res,path);return {status,headers,body:headers['Content-Type']?.includes('application/json')?JSON.parse(body):body};
+  await api.handle(req,res,path.split('?')[0]);return {status,headers,body:headers['Content-Type']?.includes('application/json')?JSON.parse(body):body};
  }
  return {call,state:()=>whole,advance:n=>{time+=n}};
 }
@@ -121,4 +121,24 @@ test('bulk campaign processes multiple unique contacts in sequence without overl
  const data=await h.call('/api/operator/view','GET',null,cookie);
  assert.equal(data.body.contacts.filter(x=>x.status==='Atendeu').length,12);
  assert.equal(data.body.contacts.filter(x=>x.status==='Pendente').length,88);
+});
+
+test('operator embeds only in original ChatGPT Site and uses partitioned secure cookies',async()=>{
+ const h=harness();
+ const framed=await h.call('/operador?embedded=1');
+ assert.equal(framed.status,200);
+ assert.match(framed.headers['Content-Security-Policy'],/frame-ancestors 'self' https:\/\/central-de-ligacoes\.ricogisi\.chatgpt\.site/);
+ assert.match(framed.body,/header\{display:none!important\}/);
+ const normal=await h.call('/operador');
+ assert.equal(normal.status,200);
+ assert.equal(normal.body.includes('header{display:none!important}'),false);
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'ValidStrongPass123!'});
+ assert.equal(setup.status,201);
+ assert.match(setup.headers['Set-Cookie'],/HttpOnly; Secure; SameSite=None; Partitioned/);
+ const c=setup.headers['Set-Cookie'].split(';')[0];
+ const account=await h.call('/api/operator/view','GET',null,c);
+ assert.equal(account.status,200);
+ const logout=await h.call('/api/operator/logout','POST',{},c);
+ assert.match(logout.headers['Set-Cookie'],/Max-Age=0/);
+ assert.match(logout.headers['Set-Cookie'],/Partitioned/);
 });

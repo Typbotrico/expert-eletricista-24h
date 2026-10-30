@@ -24,7 +24,14 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 <button class="btn" type="submit">Criar acesso administrador</button></form>
 <form id="loginForm" class="hidden">
 <div class="field"><label>Usuário</label><input id="username" autocomplete="username" required placeholder="admin"></div>
-<div class="field"><label>Senha</label><input id="password" type="password" autocomplete="current-password" required></div><button class="btn" type="submit">Entrar</button></form>
+<div class="field"><label>Senha</label><input id="password" type="password" autocomplete="current-password" required></div><div class="actions"><button class="btn" type="submit" id="loginButton">Entrar</button><button class="btn secondary" id="showRecover" type="button">Recuperar senha</button></div></form>
+<form id="recoveryForm" class="hidden">
+<h2>Recuperar acesso do administrador</h2><p class="small">Para manter sua conta e seus contatos, use o código temporário da recuperação. Após salvar, entre normalmente com o usuário <strong>admin</strong> e a nova senha.</p>
+<div class="field"><label>Código de recuperação</label><input id="recoveryCode" autocomplete="off" required placeholder="Código recebido no link seguro"></div>
+<div class="field"><label>Nova senha (mínimo 12 caracteres)</label><input type="password" id="recoveryPassword" minlength="12" maxlength="128" autocomplete="new-password" required></div>
+<div class="field"><label>Confirme a nova senha</label><input type="password" id="recoveryConfirm" minlength="12" maxlength="128" autocomplete="new-password" required></div>
+<div class="actions"><button class="btn green" id="submitRecovery" type="submit">Salvar nova senha</button><button class="btn secondary" id="cancelRecovery" type="button">Voltar ao login</button></div>
+</form>
 </section>
 <section id="dashboard">
 <div class="flex between"><div><h1>Atendimento em lista</h1><p>Uma chamada por vez, com bloqueio de duplicidades e resultados centralizados.</p></div><div class="pill">Operação protegida · 09h–18h, seg–sex</div></div>

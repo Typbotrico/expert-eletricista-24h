@@ -142,3 +142,45 @@ test('operator embeds only in original ChatGPT Site and uses partitioned secure 
  assert.match(logout.headers['Set-Cookie'],/Max-Age=0/);
  assert.match(logout.headers['Set-Cookie'],/Partitioned/);
 });
+
+test('authorised 2-to-5 number list is safe, starts paused and advances without dialing duplicates',async()=>{
+ const h=harness();
+ const init=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'ValidPass789!!'});
+ const cookie=init.headers['Set-Cookie'].split(';')[0];
+ const payload={name:'Cinco ligações de homologação',consent:true,text:'Nome;Telefone\nPrimeiro;24999998888\nSegundo;24988887777\nTerceiro;24977776666\nQuarto;24966665555\nQuinto;24955554444'};
+ let x=await h.call('/api/operator/test-list','POST',{...payload,consent:false},cookie);
+ assert.equal(x.status,422);
+ x=await h.call('/api/operator/test-list','POST',payload,cookie);
+ assert.equal(x.status,201);assert.equal(x.body.count,5);assert.equal(x.body.campaign.paused,true);
+ const id=x.body.campaign.id;
+ let second=await h.call('/api/operator/test-list','POST',{name:'Sexto',consent:true,text:'Nome;Telefone\nSexto;24944443333\nSétimo;24933332222'},cookie);
+ await assert.rejects(async()=>{if(second.status!==201)throw Error(second.body?.error||'limite_de_cinco_numeros_de_teste')},/limite_de_cinco_numeros_de_teste/);
+ assert.equal(h.state().operatorV1.campaigns.length,1);
+ h.advance(10*3600000);
+ await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/campanha_indisponivel_ou_pausada/);
+ await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);
+ const result=[];
+ for(let i=0;i<5;i++){
+  const n=await h.call('/api/operator/claim','POST',{campaignId:id},cookie);
+  assert.equal(n.status,200);
+  const c=n.body.contact;assert.equal(result.includes(c.phone),false);result.push(c.phone);
+  const send=await h.call('/api/operator/dial','POST',{contactId:c.id},cookie,'unique-list-'+String(i).padStart(18,'0'));
+  assert.equal(send.status,200);assert.equal(send.body.contact.attempts,1);
+  assert.equal((await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).status,409);
+  assert.equal((await h.call('/api/operator/finish','POST',{contactId:c.id,ended:true,result:'Não atendeu'},cookie)).status,200);
+ }
+ assert.equal(result.length,5);
+ await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/lista_sem_contatos_pendentes/);
+ const status=await h.call('/api/operator/view','GET',null,cookie);
+ assert.equal(status.body.contacts.filter(c=>c.status==='Não atendeu').length,5);
+});
+test('test campaign cannot dial unapproved numbers even inside business hours',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'ValidPass789!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const camp=await h.call('/api/operator/campaign','POST',{name:'Teste inseguro',isTest:true},cookie);
+ const id=camp.body.campaign.id;
+ await h.call('/api/operator/import','POST',{campaignId:id,text:'Nome;Telefone\nSem consentimento;24999998888'},cookie);
+ await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);
+ await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/lista_sem_contatos_pendentes/);
+});

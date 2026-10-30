@@ -92,3 +92,33 @@ test('login has short cooldown only after failed passwords; successful login cle
  assert.equal((await h.call('/api/operator/login','POST',{username:'admin',password:'ValidStrongPass123!'})).status,200);
  assert.equal((await h.call('/api/operator/login','POST',{username:'admin',password:'ValidStrongPass123!'})).status,200);
 });
+
+test('bulk campaign processes multiple unique contacts in sequence without overlap',async()=>{
+ const h=harness();
+ const first=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'ValidPass789!!'});
+ const cookie=first.headers['Set-Cookie'].split(';')[0];
+ const camp=await h.call('/api/operator/campaign','POST',{name:'Lista de 100 clientes'},cookie);const id=camp.body.campaign.id;
+ const rows=['Nome;Telefone'];for(let i=0;i<100;i++)rows.push('Cliente '+i+';2499'+String(1000000+i).padStart(7,'0'));
+ rows.push(rows[7]);
+ let imp=await h.call('/api/operator/import','POST',{campaignId:id,text:rows.join('\n')},cookie);
+ assert.equal(imp.status,200);assert.equal(imp.body.added,100);assert.equal(imp.body.duplicates,1);
+ await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);
+ const called=new Set();
+ for(let i=0;i<12;i++){
+  const claimed=await h.call('/api/operator/claim','POST',{campaignId:id},cookie);
+  assert.equal(claimed.status,200);const current=claimed.body.contact;assert.equal(called.has(current.phone),false);
+  called.add(current.phone);
+  const key='batch-idempotency-'+String(i).padStart(3,'0');
+  const sent=await h.call('/api/operator/dial','POST',{contactId:current.id},cookie,key);
+  assert.equal(sent.status,200);assert.equal(sent.body.contact.attempts,1);
+  const duplicate=await h.call('/api/operator/dial','POST',{contactId:current.id},cookie,key);
+  assert.equal(duplicate.body.contact.attempts,1);
+  const concurrent=await h.call('/api/operator/claim','POST',{campaignId:id},cookie);
+  assert.equal(concurrent.status,409);
+  const ended=await h.call('/api/operator/finish','POST',{contactId:current.id,result:'Atendeu',ended:true},cookie);
+  assert.equal(ended.status,200);
+ }
+ const data=await h.call('/api/operator/view','GET',null,cookie);
+ assert.equal(data.body.contacts.filter(x=>x.status==='Atendeu').length,12);
+ assert.equal(data.body.contacts.filter(x=>x.status==='Pendente').length,88);
+});

@@ -72,6 +72,8 @@ function createMotor({adminToken,agentToken,store,backup={selected:'',campaigns:
   transact:fn=>serial(async()=>{const next=copy(state);const out=await fn(next);await save(next);return out}),
   secret:process.env.CENTRAL_OPERATOR_SESSION_SECRET,
   setupKey:process.env.CENTRAL_OPERATOR_SETUP_KEY,
+  recoveryToken:process.env.CENTRAL_OPERATOR_RECOVERY_TOKEN,
+  recoveryExpiresAt:Number(process.env.CENTRAL_OPERATOR_RECOVERY_EXPIRES_AT||0),
   testPhones:testNumbers,
   now
  });

@@ -24,7 +24,10 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
  const userView=u=>{const d=data(),own=d.contacts.find(c=>c.owner===u.id&&['Reservado','Comando enviado','Resultado desconhecido'].includes(c.status));return {user:basicUser(u),campaigns:d.campaigns,contacts:d.contacts.map(cleanContact),active:own?cleanContact(own):null,blocked:d.blocked.length,users:u.role==='admin'?d.users.map(basicUser):[],events:u.role==='admin'?d.events.slice(-100).reverse():[],revision:d.revision}};
  const transactData=async fn=>transact(async whole=>{whole.operatorV1||=empty();const d=whole.operatorV1;const out=await fn(d);d.revision++;return out});
  const originOk=req=>{const o=req.headers.origin;if(!o)return true;try{return new URL(o).host===req.headers.host&&new URL(o).protocol==='https:'}catch{return false}};
- const rate=(req)=>{const ip=safe(req.headers['x-forwarded-for']||req.socket?.remoteAddress||'unknown').split(',')[0];const prev=attempts.get(ip)||[];const a=prev.filter(x=>now()-x<600000);a.push(now());attempts.set(ip,a);return a.length<=12};
+ const limitKey=(req,scope)=>scope+'|'+safe(req.socket?.remoteAddress||'unknown').slice(0,120);
+ const rate=(req,scope='general')=>{const key=limitKey(req,scope);const a=(attempts.get(key)||[]).filter(x=>now()-x<60000);attempts.set(key,a);return a.length<8};
+ const recordFailure=(req,scope='general')=>{const key=limitKey(req,scope),a=(attempts.get(key)||[]).filter(x=>now()-x<60000);a.push(now());attempts.set(key,a)};
+ const clearFailures=(req,scope='general')=>attempts.delete(limitKey(req,scope));
  const csvRows=t=>{const out=[];let row=[],item='',quoted=false;const delim=((t.split(/\r?\n/,1)[0].match(/;/g)||[]).length>=(t.split(/\r?\n/,1)[0].match(/,/g)||[]).length)?';':',';for(let i=0;i<t.length;i++){const c=t[i];if(c==='"'){if(quoted&&t[i+1]==='"'){item+='"';i++}else quoted=!quoted}else if(c===delim&&!quoted){row.push(item.trim());item=''}else if((c==='\r'||c==='\n')&&!quoted){row.push(item.trim());if(row.some(Boolean))out.push(row);row=[];item='';if(c==='\r'&&t[i+1]==='\n')i++}else item+=c}row.push(item.trim());if(row.some(Boolean))out.push(row);return out};
  const importRows=text=>{let rows=csvRows(safe(text).slice(0,400000));if(rows.length===1&&rows[0].length===1)rows=safe(text).split(/\r?\n/).filter(Boolean).map(r=>r.split(/\s{2,}/));const h=rows[0]?.map(v=>normal(v).replace(/[^a-z]/g,''))||[];const a=h.findIndex(x=>['nome','cliente','contato','name'].includes(x)),b=h.findIndex(x=>['telefone','celular','fone','numero','phone'].includes(x));if(a>=0&&b>=0)rows=rows.slice(1).map(r=>[r[a],r[b]]);return rows};
  const results=new Set(['Atendeu','Não atendeu','Ocupado','Retornar','Sem interesse','Não ligar']);
@@ -40,8 +43,8 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
   if(pathname==='/api/operator/status'&&req.method==='GET')return answer(res,200,{configured:data().users.length>0,version:'1.0.0',mode:'discagem_assistida',provider:'directcall_app_web',external_calls_auto:false,persistent:true});
   if(pathname==='/api/operator/setup'&&req.method==='POST'){
    if(!setupKey||setupKey.length<24||!secret||secret.length<32)return fail(res,503,'configuracao_indisponivel');
-   if(!rate(req))return fail(res,429,'muitas_tentativas');
-   const b=await parse(req);if(!equals(safe(b.key),setupKey))return fail(res,403,'convite_invalido');
+   if(!rate(req,'setup'))return fail(res,429,'muitas_tentativas_aguarde_60_segundos');
+   const b=await parse(req);if(!equals(safe(b.key),setupKey)){recordFailure(req,'setup');return fail(res,403,'convite_invalido')}
    if(data().users.length)return fail(res,409,'administrador_ja_configurado');
    const pass=safe(b.password),name=safe(b.name).trim().slice(0,70);if(pass.length<12||pass.length>128||!name)return fail(res,422,'nome_e_senha_de_12_caracteres_obrigatorios');
    const salt=crypto.randomBytes(16).toString('hex');
@@ -49,10 +52,10 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
    return answer(res,201,{user:basicUser(user)},{'Set-Cookie':'central_operator_session='+signin(user)+'; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200'});
   }
   if(pathname==='/api/operator/reset-password'&&req.method==='POST'){
-   if(!rate(req))return fail(res,429,'muitas_tentativas');
+   if(!rate(req,'reset'))return fail(res,429,'muitas_tentativas_aguarde_60_segundos');
    if(!recoveryToken||recoveryToken.length<48||!Number.isFinite(Number(recoveryExpiresAt))||now()>=Number(recoveryExpiresAt))return fail(res,403,'codigo_expirado_ou_indisponivel');
    const b=await parse(req),candidate=safe(b.code),pass=safe(b.password);
-   if(pass.length<12||pass.length>128||candidate.length>160||!equals(candidate,recoveryToken))return fail(res,403,'codigo_invalido_ou_senha_fora_do_padrao');
+   if(pass.length<12||pass.length>128||candidate.length>160||!equals(candidate,recoveryToken)){recordFailure(req,'reset');return fail(res,403,'codigo_invalido_ou_senha_fora_do_padrao')}
    const tokenFingerprint=crypto.createHash('sha256').update(recoveryToken).digest('hex');
    const u=await transactData(async d=>{
     if(d.recoveryUsed===tokenFingerprint)throw Error('codigo_ja_utilizado');
@@ -60,12 +63,12 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
     const salt=crypto.randomBytes(16).toString('hex');admin.salt=salt;admin.hash=hashPass(pass,salt);admin.sessionVersion=(admin.sessionVersion||0)+1;
     d.recoveryUsed=tokenFingerprint;log(d,admin.id,'senha_admin_redefinida');return basicUser(admin);
    });
-   return answer(res,200,{user:u,reset:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
+   clearFailures(req,'login');clearFailures(req,'reset');return answer(res,200,{user:u,reset:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
   }
   if(pathname==='/api/operator/login'&&req.method==='POST'){
-   if(!rate(req))return fail(res,429,'muitas_tentativas');
-   const b=await parse(req);if(safe(b.password).length>128||safe(b.username).length>80)return fail(res,401,'usuario_ou_senha_invalidos');const u=data().users.find(x=>x.username===normal(b.username));if(!u||!equals(hashPass(safe(b.password),u.salt),u.hash))return fail(res,401,'usuario_ou_senha_invalidos');
-   return answer(res,200,{user:basicUser(u)},{'Set-Cookie':'central_operator_session='+signin(u)+'; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200'});
+   if(!rate(req,'login'))return fail(res,429,'muitas_tentativas_aguarde_60_segundos');
+   const b=await parse(req);if(safe(b.password).length>128||safe(b.username).length>80){recordFailure(req,'login');return fail(res,401,'usuario_ou_senha_invalidos')}const u=data().users.find(x=>x.username===normal(b.username));if(!u||!equals(hashPass(safe(b.password),u.salt),u.hash)){recordFailure(req,'login');return fail(res,401,'usuario_ou_senha_invalidos')}
+   clearFailures(req,'login');return answer(res,200,{user:basicUser(u)},{'Set-Cookie':'central_operator_session='+signin(u)+'; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200'});
   }
   if(pathname==='/api/operator/logout'&&req.method==='POST')return answer(res,200,{ok:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
   const actor=authenticated(req);if(!actor)return fail(res,401,'entre_na_central');

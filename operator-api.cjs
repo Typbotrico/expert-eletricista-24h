@@ -36,7 +36,13 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
  const during=()=>{const day=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now());const hour=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now());return !['Sat','Sun'].includes(day)&&hour>='09:00'&&hour<'18:00'};
  const change=(s,c,actor,status,action)=>{c.status=status;log(s,actor,action,c.id)};
  async function handle(req,res,pathname){
-  if(pathname==='/operador'&&req.method==='GET'){const file=fs.readFileSync(path.join(__dirname,'operador.html'));res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});return res.end(file)}
+  if(pathname==='/operador'&&req.method==='GET'){
+   const embed=new URL(req.url,'https://central-ligacoes-motor-piloto.onrender.com').searchParams.get('embedded')==='1';
+   let file=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+   if(embed){const css=':root{background:#061427}body{min-height:100%;background:#061427}header{display:none!important}main{max-width:none;padding:10px 12px 30px}#auth{margin:18px auto}footer{display:none}.card{border-radius:12px}@media(max-width:900px){.layout{grid-template-columns:1fr}}';file=file.replace('</style>',css+'</style>')}
+   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"frame-ancestors 'self' https://central-de-ligacoes.ricogisi.chatgpt.site"});
+   return res.end(file)
+  }
   if(pathname==='/operador.js'&&req.method==='GET'){const file=fs.readFileSync(path.join(__dirname,'operador.js'));res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file)}
   if(!pathname.startsWith('/api/operator/'))return false;
   if(req.method!=='GET'&&!originOk(req))return fail(res,403,'origem_invalida');
@@ -49,7 +55,7 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
    const pass=safe(b.password),name=safe(b.name).trim().slice(0,70);if(pass.length<12||pass.length>128||!name)return fail(res,422,'nome_e_senha_de_12_caracteres_obrigatorios');
    const salt=crypto.randomBytes(16).toString('hex');
    const user=await transactData(async d=>{if(d.users.length)throw Error('configuracao_existente');const u={id:crypto.randomUUID(),username:'admin',name,role:'admin',salt,hash:hashPass(pass,salt)};d.users.push(u);log(d,u.id,'admin_configurado');return u});
-   return answer(res,201,{user:basicUser(user)},{'Set-Cookie':'central_operator_session='+signin(user)+'; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200'});
+   return answer(res,201,{user:basicUser(user)},{'Set-Cookie':'central_operator_session='+signin(user)+'; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=43200'});
   }
   if(pathname==='/api/operator/reset-password'&&req.method==='POST'){
    if(!rate(req,'reset'))return fail(res,429,'muitas_tentativas_aguarde_60_segundos');
@@ -63,14 +69,14 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
     const salt=crypto.randomBytes(16).toString('hex');admin.salt=salt;admin.hash=hashPass(pass,salt);admin.sessionVersion=(admin.sessionVersion||0)+1;
     d.recoveryUsed=tokenFingerprint;log(d,admin.id,'senha_admin_redefinida');return basicUser(admin);
    });
-   clearFailures(req,'login');clearFailures(req,'reset');return answer(res,200,{user:u,reset:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
+   clearFailures(req,'login');clearFailures(req,'reset');return answer(res,200,{user:u,reset:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0'});
   }
   if(pathname==='/api/operator/login'&&req.method==='POST'){
    if(!rate(req,'login'))return fail(res,429,'muitas_tentativas_aguarde_60_segundos');
    const b=await parse(req);if(safe(b.password).length>128||safe(b.username).length>80){recordFailure(req,'login');return fail(res,401,'usuario_ou_senha_invalidos')}const u=data().users.find(x=>x.username===normal(b.username));if(!u||!equals(hashPass(safe(b.password),u.salt),u.hash)){recordFailure(req,'login');return fail(res,401,'usuario_ou_senha_invalidos')}
-   clearFailures(req,'login');return answer(res,200,{user:basicUser(u)},{'Set-Cookie':'central_operator_session='+signin(u)+'; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=43200'});
+   clearFailures(req,'login');return answer(res,200,{user:basicUser(u)},{'Set-Cookie':'central_operator_session='+signin(u)+'; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=43200'});
   }
-  if(pathname==='/api/operator/logout'&&req.method==='POST')return answer(res,200,{ok:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0'});
+  if(pathname==='/api/operator/logout'&&req.method==='POST')return answer(res,200,{ok:true},{'Set-Cookie':'central_operator_session=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0'});
   const actor=authenticated(req);if(!actor)return fail(res,401,'entre_na_central');
   if(pathname==='/api/operator/view'&&req.method==='GET')return answer(res,200,userView(actor));
   if(pathname==='/api/operator/users'&&req.method==='POST'){

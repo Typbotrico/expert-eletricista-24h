@@ -20,11 +20,14 @@ function easyRender(){
  $('easyImportDetails').style.display=admin?'block':'none';
  $('easyCampaignInfo').textContent=chosen?(list.length+' contatos · '+done+' feitos · '+(chosen.isTest?'Teste com números autorizados':'Campanha comercial')+(chosen.paused?' · Aguardando início':'')):'Escolha uma lista. Se ainda não tiver uma, clique em “Quero colocar uma lista nova”.';
  $('easyStep1').style.borderColor=chosen?'#27856a':'#41678b';
- $('easyPhoneStatus').textContent=sdkReady?'✓ Telefone carregado. Confira “Via navegador” no aparelho ao lado.':'Telefone carregando... Se não abrir, clique em “Mostrar telefone ao lado”.';
+ $('easyPhoneStatus').textContent=sdkReady?'✓ Plugin carregado, mas o login na Directcall ainda precisa ser conferido. Verifique “Via navegador” e a linha de origem no aparelho.':'Telefone carregando... Se não abrir, clique em “Mostrar telefone ao lado”.';
  $('easyPhoneStatus').classList.toggle('ok',sdkReady);
- $('easyContact').textContent=c?c.name:chosen?(pending?'Tudo pronto para a próxima pessoa':'Nenhuma ligação pendente nesta lista'):'Escolha uma lista acima';
- $('easyCallLabel').textContent=c?(c.status==='Reservado'?'Contato reservado':'Ligação atual'):'Próxima ligação';
- $('easyPhoneNumber').textContent=c?c.phone:'';
+ const upcoming=list.find(x=>x.status==='Pendente')||list.find(x=>x.status==='Retornar'&&x.callbackAt&&Date.parse(x.callbackAt)<=Date.now());
+ $('easyContact').textContent=c?c.name:chosen?(upcoming?upcoming.name:'Nenhum contato pendente nesta lista'):'Escolha uma lista acima';
+ $('easyCallLabel').textContent=c?(c.status==='Reservado'?'Contato reservado':c.status==='Resultado desconhecido'?'Revisar chamada antes de avançar':'Ligação atual'):'Próxima ligação';
+ $('easyPhoneNumber').textContent=c?c.phone:(upcoming?.phone||'');
+ const hint=!chosen?'1. Escolha uma lista de contatos.':!list.length?'Esta campanha está vazia. Importe a lista correta.':c&&c.status==='Comando enviado'?'Já existe uma tentativa registrada. Verifique se o telefone tocou antes de tentar de novo.':c&&c.status==='Resultado desconhecido'?'O comando não foi confirmado. Confira o histórico da Directcall antes de liberar este contato.':!sdkReady?'Telefone ainda não carregou. Clique em Mostrar telefone e entre na Directcall.':sequencePaused?'Chamadas pausadas. Clique em Continuar ligações.':!c&&!upcoming?'Não há contatos disponíveis para ligação nesta lista.':chosen.paused?'Ao clicar em COMEÇAR, a campanha será ativada e a primeira ligação será solicitada.':'Pronto para ligar para '+(c?.name||upcoming.name)+'.';
+ $('easyActionHint').textContent=hint;
  $('easyProgress').textContent=done+' de '+list.length+' concluídos';
  $('easyPause').textContent=sequencePaused?'▶ Continuar ligações':'⏸ Pausar ligações';
  $('easyStart').textContent=c&&c.status==='Reservado'?'☎ LIGAR PARA ESTE CONTATO':'▶ COMEÇAR A LIGAR';
@@ -72,7 +75,7 @@ window.addEventListener('message',e=>{
  if(e.origin!==location.origin||e.source!==$('phoneFrame')?.contentWindow)return;
  const m=e.data;if(m?.source!=='central-phone')return;
  if(m.type==='ready'){sdkReady=true;notice('sdkStatus','Telefone Directcall carregado no painel, sem sobrepor a Central. Confira Via navegador e o headset.','good');show();}
- if(m.type==='error'){notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');}
+ if(m.type==='error'){sdkReady=false;notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');status('O telefone não carregou. Abra o APP Directcall e verifique a configuração.','error');show();}
  if(m.type==='dial-ack'){const pending=pendingPhoneCalls.get(m.requestId);if(!pending)return;clearTimeout(pending.timeout);pendingPhoneCalls.delete(m.requestId);m.ok?pending.resolve():pending.reject(Error(m.message||'Comando não confirmado'));}
 });
 async function sdk(){
@@ -134,9 +137,10 @@ $('easyStart').onclick=()=>action(async()=>{
  if(sequencePaused)throw Error('Ligações pausadas. Clique em Continuar ligações');
  let chosen=view?.campaigns.find(c=>c.id===campaignId);
  if(!chosen)throw Error('Escolha sua lista no passo 1');
- if(chosen.paused){await request('pause',{method:'POST',data:{campaignId,paused:false}});await refresh()}
+ if(chosen.paused){status('Etapa 1/3: ativando a lista...');await request('pause',{method:'POST',data:{campaignId,paused:false}});await refresh()}
+ status('Etapa 2/3: reservando o próximo contato e enviando para a Directcall...');
  await beginQueueDial();
- status('Ligação solicitada. Quando terminar no Directcall, desligue, escolha o resultado e salve para ligar ao próximo.','good');
+ status('Etapa 3/3: comando entregue ao plugin. Verifique se a Directcall iniciou a ligação e se o celular tocou. A Central não recebe confirmação de toque.','good');
 });
 $('easyResult').onchange=()=>{$('easyReturnRow').classList.toggle('hidden',$('easyResult').value!=='Retornar');show()};
 $('easyEnded').onchange=()=>show();
@@ -170,7 +174,9 @@ async function requestOneDial(c){
  if(!sdkReady)throw Error('Abra o telefone da Directcall antes de iniciar a fila');
  if(sequencePaused)throw Error('Fila pausada pelo operador');
  const key=crypto.randomUUID().replaceAll('-','');
+ status('Registrando a tentativa para '+c.name+'... Não clique novamente.');
  await request('dial',{method:'POST',data:{contactId:c.id},key});
+ status('Enviando '+c.phone+' ao telefone Directcall. Aguardando resposta técnica do plugin...');
  try{await sendProvider(c)}
  catch(e){try{await request('unknown',{method:'POST',data:{contactId:c.id}})}catch{}throw Error('Não foi possível confirmar o envio. O contato ficou bloqueado para evitar outra discagem. Confira no APP. '+err(e))}
  status('Ligação solicitada para '+c.name+' ('+c.phone+'). Aguarde no Directcall. Ao encerrar, marque o resultado e escolha Salvar e ligar próximo.','good');
@@ -183,6 +189,7 @@ async function beginQueueDial(){
  let c=active();
  if(c&&c.status!=='Reservado')throw Error('Já existe chamada em andamento ou com resultado desconhecido. Finalize-a primeiro.');
  if(!c){const r=await request('claim',{method:'POST',data:{campaignId}});c=r.contact;}
+ status('Contato selecionado: '+c.name+' ('+c.phone+'). Enviando o comando à Directcall...');
  await requestOneDial(c);
 }
 async function finishCurrent(dialNext){

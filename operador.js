@@ -8,6 +8,7 @@ async function request(path,{method='GET',data=null,key=null}={}){const opt={met
 function setupUI(configured){$('auth').classList.remove('hidden');$('dashboard').classList.remove('ready');$('setupForm').classList.toggle('hidden',configured);$('loginForm').classList.toggle('hidden',!configured);$('recoveryForm').classList.add('hidden');notice('authMessage',configured?'Usuário: admin. Use a senha do primeiro cadastro ou recupere seu acesso.':'Primeiro acesso: crie a conta do administrador.');const fragment=new URLSearchParams(location.hash.replace(/^#/,''));if(!configured&&fragment.has('setup'))$('setupKey').value=fragment.get('setup');if(configured&&fragment.has('recuperar')){const code=fragment.get('recuperar');$('recoveryCode').value=code;$('loginForm').classList.add('hidden');$('recoveryForm').classList.remove('hidden');notice('authMessage','Recuperação autorizada: escolha uma nova senha de pelo menos 12 caracteres.','good');}if(fragment.has('recuperar')||fragment.has('setup'))history.replaceState(null,'',location.pathname+location.search);}
 const active=()=>view?.active||null;
 
+function insideCallHours(){const now=new Date(),wd=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now),tm=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);return !['Sat','Sun'].includes(wd)&&tm>='09:00'&&tm<'18:00'}
 function easyRender(){
  if(!view)return;
  const admin=view.user.role==='admin',all=view.campaigns||[],chosen=all.find(c=>c.id===campaignId);
@@ -26,14 +27,14 @@ function easyRender(){
  $('easyContact').textContent=c?c.name:chosen?(upcoming?upcoming.name:'Nenhum contato pendente nesta lista'):'Escolha uma lista acima';
  $('easyCallLabel').textContent=c?(c.status==='Reservado'?'Contato reservado':c.status==='Resultado desconhecido'?'Revisar chamada antes de avançar':'Ligação atual'):'Próxima ligação';
  $('easyPhoneNumber').textContent=c?c.phone:(upcoming?.phone||'');
- const hint=!chosen?'1. Escolha uma lista de contatos.':!list.length?'Esta campanha está vazia. Importe a lista correta.':c&&c.status==='Comando enviado'?'Já existe uma tentativa registrada. Verifique se o telefone tocou antes de tentar de novo.':c&&c.status==='Resultado desconhecido'?'O comando não foi confirmado. Confira o histórico da Directcall antes de liberar este contato.':!sdkReady?'Telefone ainda não carregou. Clique em Mostrar telefone e entre na Directcall.':sequencePaused?'Chamadas pausadas. Clique em Continuar ligações.':!c&&!upcoming?'Não há contatos disponíveis para ligação nesta lista.':chosen.paused?'Ao clicar em COMEÇAR, a campanha será ativada e a primeira ligação será solicitada.':'Pronto para ligar para '+(c?.name||upcoming.name)+'.';
+ const hint=!chosen?'1. Escolha uma lista de contatos.':!list.length?'Esta campanha está vazia. Importe a lista correta.':c&&c.status==='Comando enviado'?'Já existe uma tentativa registrada. Verifique se o telefone tocou antes de tentar de novo.':c&&c.status==='Resultado desconhecido'?'O comando não foi confirmado. Confira o histórico da Directcall antes de liberar este contato.':!sdkReady?'Telefone ainda não carregou. Clique em Mostrar telefone e entre na Directcall.':!chosen.isTest&&!insideCallHours()?'Esta lista é COMERCIAL e só permite chamadas das 09h às 18h, de segunda a sexta. Para testar agora, importe o CSV em uma NOVA LISTA DE TESTE autorizada.':sequencePaused?'Chamadas pausadas. Clique em Continuar ligações.':!c&&!upcoming?'Não há contatos disponíveis para ligação nesta lista.':chosen.paused?'Ao clicar em COMEÇAR, a campanha será ativada e a primeira ligação será solicitada.':'Pronto para ligar para '+(c?.name||upcoming.name)+'.';
  $('easyActionHint').textContent=hint;
  $('easyRetry').classList.toggle('hidden',!(c&&chosen?.isTest&&c.attempts<2&&['Comando enviado','Resultado desconhecido'].includes(c.status)));
  $('easyRetry').disabled=busy;
  $('easyProgress').textContent=done+' de '+list.length+' concluídos';
  $('easyPause').textContent=sequencePaused?'▶ Continuar ligações':'⏸ Pausar ligações';
  $('easyStart').textContent=c&&c.status==='Reservado'?'☎ LIGAR PARA ESTE CONTATO':'▶ COMEÇAR A LIGAR';
- $('easyStart').disabled=busy||sequencePaused||!chosen||!sdkReady||(!!c&&c.status!=='Reservado')||(!c&&pending===0);
+ $('easyStart').disabled=busy||sequencePaused||!chosen||!sdkReady||(!chosen.isTest&&!insideCallHours())||(!!c&&c.status!=='Reservado')||(!c&&pending===0);
  const canFinish=c&&['Comando enviado','Resultado desconhecido','Reservado'].includes(c.status);
  $('easyResultSection').classList.toggle('hidden',!canFinish);
  $('easySaveNext').disabled=busy||sequencePaused||!sdkReady||!canFinish||!$('easyEnded').checked||!$('easyResult').value||($('easyResult').value==='Retornar'&&!$('easyCallbackAt').value);
@@ -129,7 +130,8 @@ $('easyImport').onclick=()=>action(async()=>{
  if(!$('easyConsent').checked)throw Error('Confirme a autorização dos destinatários');
  const text=$('easyPaste').value.trim();
  if(!text)throw Error('Escolha um arquivo CSV ou cole os contatos');
- const r=await request('test-list',{method:'POST',data:{name:'Minha lista de teste',text,consent:true}});
+ const names=text.split(/\r?\n/).map(x=>x.split(/[;,]/)[0].trim()).filter(x=>x&&!/^nome$/i.test(x));const campaignName='Teste '+(names.slice(0,2).join(' e ')||'contatos')+' · '+new Date().toLocaleDateString('pt-BR');
+ const r=await request('test-list',{method:'POST',data:{name:campaignName,text,consent:true}});
  campaignId=r.campaign.id;localStorage.setItem(KEY,campaignId);
  $('easyPaste').value='';$('easyFile').value='';$('easyConsent').checked=false;$('easyImportDetails').open=false;
  status('✓ Lista com '+r.count+' contatos pronta! Agora confira o telefone e clique em COMEÇAR A LIGAR.','good');

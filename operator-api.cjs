@@ -47,7 +47,7 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
   if(pathname==='/telefone'&&req.method==='GET'){
    if(!authenticated(req))return fail(res,401,'entre_na_central');
    const file=fs.readFileSync(path.join(__dirname,'telefone.html'));
-   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"frame-ancestors 'self'"});
+   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"frame-ancestors 'self' https://central-de-ligacoes.ricogisi.chatgpt.site"});
    return res.end(file);
   }
   if(!pathname.startsWith('/api/operator/'))return false;

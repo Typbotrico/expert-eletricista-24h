@@ -492,6 +492,21 @@ test('outgoing hangup needs explicit Chrome detector and resume does not claim s
  new vm.Script(ui,{filename:'operador.js'});
 });
 
+test('verified automatic hangup can save pending classification without clicking the result',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ const select=html.match(/<select id="result">([\\s\\S]*?)<\\/select>/);
+ assert.ok(select,'The advanced result select must exist');
+ assert.match(select[1],/<option value="A classificar" hidden>/,'The main result select needs a pending-classification option');
+ assert.match(ui,/resultField\\.value='A classificar'/);
+ assert.match(ui,/if\\(resultField\\.value!=='A classificar'\\)/);
+ const assigned=ui.indexOf("resultField.value='A classificar'");
+ const advance=ui.indexOf('await finishCurrent(true)',assigned);
+ assert.ok(advance>assigned,'The auto classification must be prepared before saving and advancing');
+ new vm.Script(ui,{filename:'operador.js'});
+});
+
 test('operator diagnosis distinguishes blocked attempt from reserved contact and never dials by itself',()=>{
  const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
  const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');

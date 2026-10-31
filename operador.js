@@ -9,7 +9,7 @@ function setupUI(configured){$('auth').classList.remove('hidden');$('dashboard')
 const active=()=>view?.active||null;
 
 function insideCallHours(){const now=new Date(),wd=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now),tm=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);return !['Sat','Sun'].includes(wd)&&tm>='09:00'&&tm<'18:00'}
-let lastRequestedDial=null,vendorCallEnded=false,autoCampaignId=null,queuedHangup=null,autoHangupProcessing=false;
+let lastRequestedDial=null,vendorCallEnded=false,autoCampaignId=null,queuedHangup=null,autoHangupProcessing=false,hangupBridgeReady=false;
 function easyRender(){
  if(!view)return;
  const admin=view.user.role==='admin',all=view.campaigns||[],chosen=all.find(c=>c.id===campaignId);
@@ -48,9 +48,9 @@ function easyRender(){
   button.disabled=busy||sequencePaused||!sdkReady||!canFinish;
  }
  $('easyPause').disabled=busy;
- $('easyAutoNext').disabled=!chosen?.isTest||!sdkReady||sequencePaused;
+ $('easyAutoNext').disabled=!chosen?.isTest||!sdkReady||sequencePaused||!hangupBridgeReady;
  const autoActive=autoCampaignId===campaignId&&chosen?.isTest===true&&!sequencePaused;
- $('easyAutoStatus').textContent=autoActive?'AUTOMÁTICO ATIVO: aguardando a Directcall confirmar o encerramento para chamar o próximo contato.':'Clique uma vez em COMEÇAR A LIGAR. A sequência seguirá automaticamente se a Directcall confirmar cada encerramento.';
+ $('easyAutoStatus').textContent=autoActive?(hangupBridgeReady?'AUTOMÁTICO ATIVO: detector de encerramento conectado. Aguardando fim da chamada.':'AUTOMÁTICO EM ESPERA: não foi detectado um monitor confiável de encerramento.'):(hangupBridgeReady?'✓ DETECTOR DE ENCERRAMENTO ATIVO: modo automático preparado.':'⚠ DETECTOR NÃO CONECTADO. A Directcall não informa o fim das chamadas de saída ao site; instale o detector Chrome para avançar sem cliques.');
  const oldPending=!!(c&&chosen?.isTest&&['Comando enviado','Resultado desconhecido'].includes(c.status));
  $('easyResumeAuto').classList.toggle('hidden',!oldPending||vendorCallEnded);
  $('easyResumeAuto').disabled=busy||!sdkReady||sequencePaused;
@@ -120,6 +120,7 @@ window.addEventListener('message',e=>{
  if(e.origin!==location.origin||e.source!==$('phoneFrame')?.contentWindow)return;
  const m=e.data;if(m?.source!=='central-phone')return;
  if(m.type==='ready'){sdkReady=true;notice('sdkStatus','Telefone Directcall carregado no painel, sem sobrepor a Central. Confira Via navegador e o headset.','good');show();}
+ if(m.type==='hangup-bridge-ready'){hangupBridgeReady=true;notice('sdkStatus','Telefone Directcall carregado e detector de encerramento do Chrome conectado.','good');show();}
  if(m.type==='error'){sdkReady=false;notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');status('O telefone não carregou. Abra o APP Directcall e verifique a configuração.','error');show();}
  if(m.type==='dial-ack'||m.type==='probe-ack'){const pending=pendingPhoneCalls.get(m.requestId);if(!pending)return;clearTimeout(pending.timeout);pendingPhoneCalls.delete(m.requestId);m.ok?pending.resolve(m.message):pending.reject(Error(m.message||'O aplicativo não respondeu'));}
  if(m.type==='call-ended'){
@@ -144,7 +145,7 @@ async function processQueuedHangup(){
   vendorCallEnded=true;
   $('easyEnded').checked=true;$('ended').checked=true;
   const camp=view.campaigns.find(x=>x.id===c.campaignId);
-  if(autoCampaignId===c.campaignId&&camp?.isTest&&!camp.paused&&!sequencePaused&&sdkReady){
+  if(autoCampaignId===c.campaignId&&camp?.isTest&&!camp.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady){
    status('✓ Chamada com '+c.name+' encerrada. Registrando e iniciando o próximo número automaticamente...','good');
    $('result').value='A classificar';
    // Executamos na mesma transação de interface; o servidor libera o contato
@@ -182,7 +183,7 @@ async function sdk(force=false){
  if(alreadyLoaded&&force&&staleAttempt){
    if(!window.confirm('Existe uma tentativa de ligação registrada. Antes de reiniciar o telefone, confira que NÃO há chamada ativa na Directcall. Você já verificou isso?'))return;
  }
- sdkReady=false;
+ sdkReady=false;hangupBridgeReady=false;
  notice('sdkStatus',staleAttempt?'Abrindo telefone. Existe uma tentativa anterior pendente no histórico, mas ela não impede o carregamento.':'Abrindo telefone isolado dentro do cartão...');
  frame.src='/telefone?ts='+Date.now();
  show();
@@ -253,7 +254,8 @@ $('easyResumeAuto').onclick=()=>action(async()=>{
  if(!sdkReady||sequencePaused)throw Error('Abra o telefone Directcall e retire a pausa antes de continuar');
  if(!window.confirm('A chamada anterior com '+c.name+' JÁ ESTÁ ENCERRADA na Directcall? Ao confirmar, a Central vai registrar o resultado como A CLASSIFICAR e ligar para o próximo automaticamente.'))return;
  if(camp.paused){await request('pause',{method:'POST',data:{campaignId:c.campaignId,paused:false}});await refresh()}
- campaignId=c.campaignId;autoCampaignId=campaignId;$('easyAutoNext').checked=true;
+ campaignId=c.campaignId;autoCampaignId=hangupBridgeReady?campaignId:null;$('easyAutoNext').checked=hangupBridgeReady;
+ if(!hangupBridgeReady)status('A próxima ligação será solicitada, mas o detector de encerramento não está conectado. A sequência não pode continuar sozinha.','warn');
  $('result').value='A classificar';$('ended').checked=true;
  status('Encerrando a tentativa anterior de '+c.name+' e preparando o PRÓXIMO nome da lista...');
  const advance=await finishCurrent(true,true);
@@ -275,7 +277,8 @@ $('easyStart').onclick=()=>action(async()=>{
  if(chosen.paused){status('Etapa 1/3: ativando a lista...');await request('pause',{method:'POST',data:{campaignId,paused:false}});await refresh()}
  // Clicar em COMEÇAR é a autorização explícita para discar a lista de testes.
  // Não mostrar prompts entre as chamadas. Desligar o modo automático é opcional.
- autoCampaignId=chosen.isTest&&$('easyAutoNext').checked?campaignId:null;
+ autoCampaignId=chosen.isTest&&$('easyAutoNext').checked&&hangupBridgeReady?campaignId:null;
+ if(chosen.isTest&&!hangupBridgeReady)status('A Directcall não confirma encerramento de saída ao site. O detector Chrome não foi identificado; esta chamada não poderá avançar sozinha.','warn');
  status(autoCampaignId?'Modo automático ativo. Aguardando eventos reais de encerramento da Directcall.':'Modo manual ativo para esta campanha.','good');
  status('Etapa 2/3: reservando o próximo contato e enviando para a Directcall...');
  await beginQueueDial();
@@ -321,6 +324,7 @@ $('easyAutoNext').onchange=()=>{
  }else{
   const chosen=view?.campaigns.find(x=>x.id===campaignId);
   if(!chosen?.isTest){$('easyAutoNext').checked=false;throw Error('Automação permitida apenas para lista de teste autorizada')}
+  if(!hangupBridgeReady){$('easyAutoNext').checked=false;throw Error('Detector Chrome de encerramento não conectado. Não é seguro avançar automaticamente sem esse aviso.')}
   autoCampaignId=campaignId;status('Avanço automático ativado para os contatos de teste.','good');
  }
  show();

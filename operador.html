@@ -48,6 +48,13 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 .easy-current strong{font-size:21px;line-height:1.25;color:#f4f9ff;overflow-wrap:anywhere}
 .easy-current span{font-size:13px;color:#a9cbe3}
 .easy-result{border-top:1px solid #44627b;margin-top:18px;padding-top:15px}
+.easy-outcomes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}
+.easy-outcomes .easy-outcome{font-size:16px;min-height:58px;text-align:center;white-space:normal;background:#1d5178;border:1px solid #4189b1;color:#fff;font-weight:750}
+.easy-outcomes .easy-outcome:hover{background:#276ba0}
+.easy-outcomes .easy-outcome:disabled{opacity:.5}
+@media(max-width:600px){.easy-outcomes{grid-template-columns:1fr}}
+#easyExtraDetails{margin:14px 0}
+
 .easy-result button{margin:8px 0}
 .easy-confirm{font-size:15px;font-weight:700;margin:16px 0}
 .easy-actions{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;font-size:13px;color:#b6d1e5;margin-top:16px}
@@ -123,11 +130,23 @@ body.easy-mode #dashboard>div.flex.between p{display:none}
 <p class="small">O primeiro botão tenta ligar novamente para este mesmo contato, depois da sua confirmação. O segundo encerra a tentativa sem fazer nenhuma chamada.</p></div>
 <button id="easyStart" type="button" class="btn green easy-wide easy-primary">▶ COMEÇAR A LIGAR</button>
 <div class="easy-result" id="easyResultSection">
-<h3>Terminou a ligação?</h3>
+<h3>Terminou a ligação? Escolha como foi:</h3>
+<div class="notice good hidden" id="easyHangupNotice" role="status">✓ Directcall informou que a chamada foi encerrada. Escolha abaixo para salvar e ligar para o próximo.</div>
+<p class="small">Um toque no resultado salva a ligação e prepara o próximo contato. Se a Directcall não informar o encerramento, confirme que já desligou.</p>
+<div class="easy-outcomes" id="easyOutcomes">
+<button type="button" data-call-result="Atendeu" class="btn easy-outcome">✓ Atendeu → Próximo</button>
+<button type="button" data-call-result="Não atendeu" class="btn easy-outcome">☎ Não atendeu → Próximo</button>
+<button type="button" data-call-result="Ocupado" class="btn easy-outcome">◷ Ocupado → Próximo</button>
+<button type="button" data-call-result="Sem interesse" class="btn easy-outcome">✕ Sem interesse → Próximo</button>
+<button type="button" data-call-result="Retornar" class="btn easy-outcome">↺ Retornar depois</button>
+<button type="button" data-call-result="Não ligar" class="btn easy-outcome">⊘ Não ligar mais</button>
+</div>
+<details id="easyExtraDetails" class="easy-details"><summary>Outros detalhes do atendimento</summary>
 <div class="field"><label for="easyResult">Como foi?</label><select id="easyResult">
 <option value="">Escolha o resultado...</option><option>Atendeu</option><option>Não atendeu</option><option>Ocupado</option><option>Retornar</option><option>Sem interesse</option><option>Não ligar</option></select></div>
 <div class="field hidden" id="easyReturnRow"><label for="easyCallbackAt">Dia e hora para retornar</label><input id="easyCallbackAt" type="datetime-local"></div>
 <label class="checkbox easy-confirm"><input id="easyEnded" type="checkbox"> Já desliguei no telefone da Directcall</label>
+</details>
 <button id="easySaveNext" type="button" class="btn green easy-wide easy-primary">✔ SALVAR E LIGAR PARA O PRÓXIMO</button>
 <button id="easySaveOnly" type="button" class="btn secondary easy-wide">Salvar e parar por agora</button>
 <p class="small muted">Antes de ligar para outra pessoa, você precisa desligar e marcar a confirmação acima.</p>

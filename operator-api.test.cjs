@@ -197,3 +197,19 @@ test('isolated Directcall phone is only served to authenticated operators and fi
  assert.match(yes.body,/source:'central-phone'/);
  assert.match(yes.body,/m\.type==='dial'/);
 });
+
+test('easy three-step workflow displays while keeping advanced controls and secured phone',async()=>{
+ const h=harness();
+ const operator=await h.call('/operador');
+ assert.equal(operator.status,200);
+ assert.match(operator.body,/body class="easy-mode"/);
+ assert.match(operator.body,/id="easyCampaign"/);
+ assert.match(operator.body,/id="easyImport"/);
+ assert.match(operator.body,/id="easyStart"/);
+ assert.match(operator.body,/id="easySaveNext"/);
+ assert.match(operator.body,/id="easyEnded"/);
+ assert.match(operator.body,/id="easyPause"/);
+ assert.match(operator.body,/id="easyModeToggle"/);
+ assert.match(operator.body,/id="phoneFrame"/);
+ assert.match(operator.body,/id="toggleCampaign"/);
+});

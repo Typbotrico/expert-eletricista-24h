@@ -377,7 +377,7 @@ test('one-tap result buttons save and start next only after confirmed provider h
  assert.match(html,/id="easyHangupNotice"/);
  assert.match(ui,/if\(m\.type==='call-ended'\)/);
  assert.match(ui,/m\.requestId!==lastRequestedDial\.id/);
- assert.match(ui,/m\.phone!==c\.phone/);
+ assert.match(ui,/c\.phone!==event\.phone/);
  assert.match(ui,/vendorCallEnded=true/);
  assert.match(ui,/\$\('easyEnded'\)\.checked=true/);
  assert.match(ui,/if\(!vendorCallEnded&&!window\.confirm/);

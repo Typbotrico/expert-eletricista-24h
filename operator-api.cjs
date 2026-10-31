@@ -30,7 +30,7 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
  const clearFailures=(req,scope='general')=>attempts.delete(limitKey(req,scope));
  const csvRows=t=>{const out=[];let row=[],item='',quoted=false;const delim=((t.split(/\r?\n/,1)[0].match(/;/g)||[]).length>=(t.split(/\r?\n/,1)[0].match(/,/g)||[]).length)?';':',';for(let i=0;i<t.length;i++){const c=t[i];if(c==='"'){if(quoted&&t[i+1]==='"'){item+='"';i++}else quoted=!quoted}else if(c===delim&&!quoted){row.push(item.trim());item=''}else if((c==='\r'||c==='\n')&&!quoted){row.push(item.trim());if(row.some(Boolean))out.push(row);row=[];item='';if(c==='\r'&&t[i+1]==='\n')i++}else item+=c}row.push(item.trim());if(row.some(Boolean))out.push(row);return out};
  const importRows=text=>{let rows=csvRows(safe(text).slice(0,400000));if(rows.length===1&&rows[0].length===1)rows=safe(text).split(/\r?\n/).filter(Boolean).map(r=>r.split(/\s{2,}/));const h=rows[0]?.map(v=>normal(v).replace(/[^a-z]/g,''))||[];const a=h.findIndex(x=>['nome','cliente','contato','name'].includes(x)),b=h.findIndex(x=>['telefone','celular','fone','numero','phone'].includes(x));if(a>=0&&b>=0)rows=rows.slice(1).map(r=>[r[a],r[b]]);return rows};
- const results=new Set(['Atendeu','Não atendeu','Ocupado','Retornar','Sem interesse','Não ligar']);
+ const results=new Set(['Atendeu','Não atendeu','Ocupado','Retornar','Sem interesse','Não ligar','A classificar']);
  const allowTests=new Set(testPhones.map(phone).filter(Boolean));
  const canCall=(campaign,c)=>campaign?.isTest===true?(Array.isArray(campaign.authorizedPhones)?campaign.authorizedPhones.includes(c?.phone):(allowTests.has(c?.phone)||data().testPhonesAuthorized?.includes(c?.phone))):during();
  const during=()=>{const day=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now());const hour=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now());return !['Sat','Sun'].includes(day)&&hour>='09:00'&&hour<'18:00'};
@@ -194,8 +194,34 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
   }
   if(pathname==='/api/operator/finish'&&req.method==='POST'){
    const b=await parse(req);if(b.ended!==true||!results.has(b.result))return fail(res,422,'confirmacao_encerramento_e_resultado_obrigatorios');
+   if(b.result==='A classificar'&&b.providerHangupVerified!==true)return fail(res,422,'encerramento_do_provedor_necessario');
    if(b.result==='Retornar'&&(!b.callbackAt||Number.isNaN(Date.parse(b.callbackAt))||Date.parse(b.callbackAt)<now()||Date.parse(b.callbackAt)>now()+30*86400000))return fail(res,422,'data_de_retorno_invalida');
-   const c=await transactData(async d=>{const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&['Reservado','Comando enviado','Resultado desconhecido'].includes(x.status));if(!c)throw Error('contato_indisponivel');c.result=b.result;c.notes=safe(b.notes).slice(0,1000);c.finishedAt=clock();c.callbackAt=b.result==='Retornar'?new Date(b.callbackAt).toISOString():null;c.owner=null;if(b.result==='Não ligar'&&!d.blocked.includes(c.phone))d.blocked.push(c.phone);change(d,c,actor.id,b.result,'chamada_classificada');return cleanContact(c)});return answer(res,200,{contact:c});
+   const c=await transactData(async d=>{
+    const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&['Reservado','Comando enviado','Resultado desconhecido'].includes(x.status));
+    if(!c)throw Error('contato_indisponivel');
+    const camp=d.campaigns.find(x=>x.id===c.campaignId);
+    if(b.result==='A classificar'&&(!camp?.isTest||c.status!=='Comando enviado'))throw Error('classificacao_pendente_permitida_apenas_em_teste');
+    c.result=b.result;c.notes=safe(b.notes).slice(0,1000);
+    c.finishedAt=clock();c.callbackAt=b.result==='Retornar'?new Date(b.callbackAt).toISOString():null;c.owner=null;
+    if(b.result==='A classificar'){c.reviewOwner=actor.id;c.notes=(c.notes+' | Encerramento informado pelo aplicativo Directcall; classificação pendente').slice(0,1000);}
+    if(b.result==='Não ligar'&&!d.blocked.includes(c.phone))d.blocked.push(c.phone);
+    change(d,c,actor.id,b.result,b.result==='A classificar'?'chamada_encerrada_classificacao_pendente':'chamada_classificada');
+    return cleanContact(c);
+   });return answer(res,200,{contact:c});
+  }
+  if(pathname==='/api/operator/reclassify'&&req.method==='POST'){
+   const b=await parse(req);
+   if(!results.has(b.result)||b.result==='A classificar')return fail(res,422,'classificacao_invalida');
+   if(b.result==='Retornar'&&(!b.callbackAt||Number.isNaN(Date.parse(b.callbackAt))||Date.parse(b.callbackAt)<=now()||Date.parse(b.callbackAt)>now()+30*86400000))return fail(res,422,'data_de_retorno_invalida');
+   const c=await transactData(async d=>{
+    const c=d.contacts.find(x=>x.id===b.contactId&&x.result==='A classificar'&&x.status==='A classificar');
+    if(!c)throw Error('contato_nao_aguarda_classificacao');
+    if(actor.role!=='admin'&&c.reviewOwner!==actor.id)throw Error('sem_permissao_para_classificar');
+    c.result=b.result;c.callbackAt=b.result==='Retornar'?new Date(b.callbackAt).toISOString():null;c.reviewOwner=null;
+    c.notes=(c.notes+' | Classificação concluída').slice(0,1000);
+    if(b.result==='Não ligar'&&!d.blocked.includes(c.phone))d.blocked.push(c.phone);
+    change(d,c,actor.id,b.result,'chamada_reclassificada');return cleanContact(c);
+   });return answer(res,200,{contact:c});
   }
   if(pathname==='/api/operator/export'&&req.method==='GET'){if(actor.role!=='admin')return fail(res,403,'somente_admin');const d=data();const q=x=>'"'+safe(x).replace(/"/g,'""')+'"';const rows=[['Campanha','Nome','Telefone','Status','Resultado','Tentativas','Responsável','Solicitada em','Encerrada em','Retorno','Notas'],...d.contacts.map(c=>[d.campaigns.find(x=>x.id===c.campaignId)?.name||'',c.name,c.phone,c.status,c.result,c.attempts,d.users.find(x=>x.id===c.owner)?.name||'',c.requestedAt,c.finishedAt,c.callbackAt,c.notes])];const out='\ufeff'+rows.map(r=>r.map(q).join(';')).join('\r\n');res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="central-operadores.csv"','Cache-Control':'no-store'});return res.end(out)}
   return fail(res,404,'rota_nao_encontrada');

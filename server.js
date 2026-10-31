@@ -243,7 +243,7 @@ if(require.main===module){
   const clientCheck=spawnSync(process.execPath,['--check','operador.js'],{encoding:'utf8',timeout:10000});
   if(clientCheck.status!==0){console.error('Central: sintaxe da tela de discagem reprovada. Deploy abortado.',String(clientCheck.stderr||clientCheck.stdout).slice(0,2000));process.exit(1)}
   const check=spawnSync(process.execPath,['--test','operator-api.test.cjs'],{encoding:'utf8',timeout:30000});
-  if(check.status!==0){console.error('Central: teste de segurança do discador reprovado. Deploy abortado.',String(check.stderr||check.stdout).slice(0,2400));process.exit(1)}
+  if(check.status!==0){console.error('Central: teste de segurança do discador reprovado. Deploy abortado.',String(check.stderr||check.stdout).slice(-8000));process.exit(1)}
   console.log('Central: testes automatizados do discador aprovados.');
  }
 

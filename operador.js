@@ -48,6 +48,27 @@ function easyRender(){
   button.disabled=busy||sequencePaused||!sdkReady||!canFinish;
  }
  $('easyPause').disabled=busy;
+ $('easyAutoNext').disabled=!chosen?.isTest||!sdkReady||sequencePaused;
+ if(!chosen?.isTest&&$('easyAutoNext').checked)$('easyAutoNext').checked=false;
+ const awaiting=list.filter(x=>x.result==='A classificar');
+ $('reviewDetails').classList.toggle('hidden',awaiting.length===0);
+ $('reviewSummary').textContent='Resultados para classificar depois ('+awaiting.length+')';
+ const review=$('reviewItems');review.replaceChildren();
+ for(const item of awaiting){
+  const row=document.createElement('div');row.className='review-row';
+  const heading=document.createElement('strong');heading.textContent=item.name+' · '+item.phone;
+  const pick=document.createElement('select');pick.setAttribute('aria-label','Classificar ligação de '+item.name);
+  for(const v of ['', 'Atendeu','Não atendeu','Ocupado','Sem interesse','Não ligar']){
+   const o=new Option(v||'Como foi a ligação?',v);pick.add(o);
+  }
+  const btn=document.createElement('button');btn.type='button';btn.className='btn secondary';btn.textContent='Salvar classificação';
+  btn.onclick=()=>action(async()=>{if(!pick.value)throw Error('Escolha o resultado antes de salvar');
+   if(pick.value==='Não ligar'&&!window.confirm('Bloquear novas chamadas para '+item.name+'?'))return;
+   await request('reclassify',{method:'POST',data:{contactId:item.id,result:pick.value}});
+   status('Resultado de '+item.name+' classificado com sucesso.','good');
+  });
+  row.append(heading,pick,btn);review.append(row);
+ }
  $('easyModeToggle').textContent=document.body.classList.contains('easy-mode')?'⚙ Ver opções avançadas':'← Voltar ao modo fácil';
 }
 
@@ -97,6 +118,16 @@ window.addEventListener('message',e=>{
   status('✓ A Directcall informou que a chamada com '+c.name+' terminou. Escolha o resultado para SALVAR E LIGAR PARA O PRÓXIMO.','good');
   show();
   if(document.body.classList.contains('easy-mode'))$('easyResultSection').scrollIntoView({behavior:'smooth',block:'nearest'});
+  if($('easyAutoNext').checked&&!sequencePaused&&!busy&&sdkReady&&view?.campaigns.find(x=>x.id===c.campaignId)?.isTest){
+   action(async()=>{
+    const current=active();
+    if(!current||current.id!==c.id||!vendorCallEnded||!lastRequestedDial||lastRequestedDial.contactId!==c.id)return;
+    $('result').value='A classificar';$('ended').checked=true;
+    status('✓ Chamada encerrada. Salvando o resultado como A CLASSIFICAR e avançando para a próxima pessoa autorizada...','good');
+    await finishCurrent(true);
+    status('Avanço automático processado. Se restar contato, a próxima chamada foi solicitada. Classifique os resultados pendentes quando terminar.','good');
+   });
+  }
  }
 });
 async function sdk(force=false){
@@ -224,6 +255,14 @@ async function easyFinish(next){
 $('easySaveNext').onclick=()=>action(()=>easyFinish(true));
 $('easySaveOnly').onclick=()=>action(()=>easyFinish(false));
 $('easyPause').onclick=()=>{sequencePaused=!sequencePaused;show();status(sequencePaused?'Fila pausada: ninguém será chamado até você continuar.':'Fila liberada. Clique em COMEÇAR A LIGAR para continuar.','good')};
+$('easyAutoNext').onchange=()=>{
+ if(!$('easyAutoNext').checked){status('Avanço automático desativado. Use os botões de resultado para continuar a lista.','good');return}
+ const campaign=view?.campaigns.find(x=>x.id===campaignId);
+ if(!campaign?.isTest||!window.confirm('AUTORIZAR avanço automático somente para esta lista de teste? Quando a Directcall confirmar o fim de uma chamada, a Central poderá iniciar a PRÓXIMA ligação para um número autorizado, sem outro clique. O resultado ficará A CLASSIFICAR até você revisá-lo.')){
+  $('easyAutoNext').checked=false;return;
+ }
+ status('Avanço automático ativado nesta sessão para a lista de teste. Se o aviso de encerramento não chegar, use os botões de resultado.','good');
+};
 
 $('easyRetry').onclick=()=>action(async()=>{
  const c=active();const chosen=view?.campaigns.find(x=>x.id===c?.campaignId);
@@ -284,7 +323,7 @@ async function finishCurrent(dialNext){
  if(!$('ended').checked)throw Error('Primeiro encerre a ligação no Directcall e marque a confirmação');
  if(!$('result').value)throw Error('Selecione o resultado desta ligação');
  const callResult=$('result').value;
- await request('finish',{method:'POST',data:{contactId:c.id,result:callResult,notes:$('notes').value,callbackAt:$('callbackAt').value,ended:true}});
+ await request('finish',{method:'POST',data:{contactId:c.id,result:callResult,notes:$('notes').value,callbackAt:$('callbackAt').value,ended:true,providerHangupVerified:callResult==='A classificar'&&vendorCallEnded}});
  vendorCallEnded=false;lastRequestedDial=null;
  $('result').value='';$('notes').value='';$('callbackAt').value='';$('ended').checked=false;$('returnBox').style.display='none';
  // The previous call is committed before any next contact can be reserved or dialled.

@@ -63,7 +63,7 @@ window.addEventListener('message',e=>{
   // must never trigger another PSTN call.
   if(e.source===f?.contentWindow&&latestCallRequest&&message.requestId===latestCallRequest.id&&message.phone===latestCallRequest.phone&&!callEndedRelayed&&Date.now()-latestCallRequest.at<7200000){
    callEndedRelayed=true;
-   inform('call-ended',{requestId:latestCallRequest.id,phone:latestCallRequest.phone,source:'directcall-hangup'});
+   inform('call-ended',{requestId:latestCallRequest.id,phone:latestCallRequest.phone,source:'directcall-hangup',mode:message.mode||'tela-directcall'});
   }
   return;
  }

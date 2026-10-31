@@ -316,7 +316,7 @@ test('Directcall browser mode is explicitly enforced rather than desktop and han
  assert.match(html,/await new Promise\(resolve=>setTimeout\(resolve,3300\)\)/);
  assert.doesNotMatch(html,/app\(\)\.comando\('1\|chamar/);
  assert.match(html,/requestVendorAck\('0\|chamar\|'/);
- assert.match(html,/e\.data\.state!==true/);
+ assert.match(html,/message\.state!==true/);
  assert.match(html,/requestVendorAck\('0\|verificar\|'/);
  assert.match(html,/mode:'app-web'/);
  const raw=html.match(/<script>([\s\S]*?)<\/script>/);

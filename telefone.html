@@ -48,7 +48,7 @@ window.addEventListener('message',e=>{
  // Quando essa mensagem alcança este quadro, encaminhamos ao atendente.
  // Não tratar acknowledgements {state:true} como finalização.
  if(message&&typeof message==='object'&&message.source==='central-autofila-extension'&&message.type==='ready'){
-  if(e.source===f?.contentWindow)inform('hangup-bridge-ready',{detector:'local-chrome-extension'});
+  if(e.source===f?.contentWindow)inform('hangup-bridge-ready',{detector:'local-chrome-extension',version:String(message.version||'')});
   return;
  }
  if(message&&typeof message==='object'&&message.source==='central-autofila-extension'&&['call-armed','call-started'].includes(message.type)){

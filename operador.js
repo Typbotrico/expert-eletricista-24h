@@ -138,7 +138,13 @@ window.addEventListener('message',e=>{
  if(e.origin!==location.origin||e.source!==$('phoneFrame')?.contentWindow)return;
  const m=e.data;if(m?.source!=='central-phone')return;
  if(m.type==='ready'){sdkReady=true;notice('sdkStatus','Telefone Directcall carregado no painel, sem sobrepor a Central. Confira Via navegador e o headset.','good');show();}
- if(m.type==='hangup-bridge-ready'){hangupBridgeReady=true;hangupBridgeVersion=m.version||hangupBridgeVersion;notice('sdkStatus','Telefone Directcall carregado; detector Chrome '+(hangupBridgeVersion||'antigo')+' conectado.','good');show();}
+ if(m.type==='hangup-bridge-ready'){
+  hangupBridgeVersion=m.version||hangupBridgeVersion;
+  const minor=Number(hangupBridgeVersion.split('.')[1]);
+  hangupBridgeReady=Number.isFinite(minor)&&minor>=5;
+  notice('sdkStatus',hangupBridgeReady?'✓ Detector Chrome '+hangupBridgeVersion+' conectado. Aguarde o sinal de chamada acompanhada.':'⚠ Detector '+(hangupBridgeVersion||'sem versão')+' desatualizado. Instale a versão 0.5 para chamadas automáticas sem cliques.',hangupBridgeReady?'good':'warn');
+  show();
+ }
  if(m.type==='hangup-bridge-state'){
   if(!lastRequestedDial||m.requestId!==lastRequestedDial.id||m.phone!==lastRequestedDial.phone)return;
   hangupCallState=m.state;

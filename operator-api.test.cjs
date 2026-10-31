@@ -215,3 +215,29 @@ test('easy three-step workflow displays while keeping advanced controls and secu
  assert.match(operator.body,/id="phoneFrame"/);
  assert.match(operator.body,/id="toggleCampaign"/);
 });
+
+test('Rico to Samira amended test campaign accepts first call without changing older list',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'ValidPass789!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const original='Nome;Telefone\nRico;24993285944\nIgor;24992002907\nBernardo;24993147385\nCris;24992678628\nLucas;24981352655';
+ const amended='Nome;Telefone\nRico;24993285944\nIgor;24992002907\nBernardo;24993147385\nSamira;24981273160\nLucas;24981352655';
+ const first=await h.call('/api/operator/test-list','POST',{name:'Lista antiga',text:original,consent:true},cookie);
+ assert.equal(first.status,201);
+ const updated=await h.call('/api/operator/test-list','POST',{name:'Lista atualizada com Samira',text:amended,consent:true},cookie);
+ assert.equal(updated.status,201);assert.equal(updated.body.count,5);
+ const camp=updated.body.campaign;
+ assert.equal(camp.authorizedPhones.length,5);
+ assert.equal(camp.authorizedPhones.includes('5524981273160'),true);
+ assert.equal(camp.authorizedPhones.includes('5524992678628'),false);
+ await h.call('/api/operator/pause','POST',{campaignId:camp.id,paused:false},cookie);
+ const claimed=await h.call('/api/operator/claim','POST',{campaignId:camp.id},cookie);
+ assert.equal(claimed.status,200);
+ assert.equal(claimed.body.contact.name,'Rico');
+ assert.equal(claimed.body.contact.phone,'5524993285944');
+ const dial=await h.call('/api/operator/dial','POST',{contactId:claimed.body.contact.id},cookie,'rico-unique-safe-123456789');
+ assert.equal(dial.status,200);
+ assert.equal(dial.body.contact.attempts,1);
+ assert.equal(dial.body.contact.status,'Comando enviado');
+ assert.equal((await h.call('/api/operator/claim','POST',{campaignId:camp.id},cookie)).status,409);
+});

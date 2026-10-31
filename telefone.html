@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Telefone Directcall integrado</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;min-width:0;height:100%;font:14px system-ui,Arial,sans-serif;background:#fff;color:#17324a}
+body{overflow-x:hidden}.top{height:49px;background:#eff5fc;border-bottom:1px solid #d5e2ef;display:flex;align-items:center;gap:9px;justify-content:space-between;padding:8px 12px}.top strong{font-size:14px}.tag{font-size:11px;border:1px solid #bfd4e7;border-radius:20px;color:#35678c;padding:4px 9px;background:#fff}
+#screen{min-height:560px;position:relative;background:#fff;overflow:hidden;padding:0 4px}
+#fallback{padding:32px 16px;text-align:center;color:#53718a;font-size:13px}
+#directcall-frame-web{position:absolute!important;top:0!important;left:50%!important;right:auto!important;bottom:auto!important;transform:translateX(-50%)!important;z-index:2!important;width:350px!important;max-width:100%!important;height:540px!important;overflow:hidden!important}
+#directcall-app-web{display:block!important;width:100%!important;max-width:100%!important;height:505px!important;min-height:505px!important}
+#directcall-frame-app-close{max-width:100%!important}
+footer{background:#f6faff;border-top:1px solid #deebf4;min-height:44px;font-size:12px;line-height:1.4;padding:9px;color:#55738e}
+@media(max-width:395px){#directcall-frame-web{width:100%!important;transform:none!important;left:0!important}#screen{padding:0}}
+</style></head><body>
+<div class="top"><strong>☎ Directcall APP</strong><span class="tag" id="status">Conectando</span></div>
+<div id="screen"><div id="fallback">Inicializando telefone no navegador...</div></div>
+<footer>Áudio pelo microfone e fone do computador. Confirme “Via navegador” no APP.</footer>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://www.directcallsoft.com/api/app/novo/app/directcall-app-web.js"></script>
+<script>
+(()=>{'use strict';
+const set=(message)=>{document.getElementById('status').textContent=message};
+const inform=(type,extra={})=>window.parent.postMessage({source:'central-phone',type,...extra},location.origin);
+const embed=()=>{const frame=document.getElementById('directcall-frame-web');const screen=document.getElementById('screen');if(!frame||!screen)return false;
+ if(frame.parentNode!==screen)screen.appendChild(frame);
+ frame.style.setProperty('position','absolute','important');frame.style.setProperty('left','50%','important');frame.style.setProperty('top','0','important');frame.style.setProperty('right','auto','important');frame.style.setProperty('bottom','auto','important');frame.style.setProperty('width','350px','important');frame.style.setProperty('height','540px','important');
+ const child=document.getElementById('directcall-app-web');if(child){child.setAttribute('allow','microphone; autoplay');child.setAttribute('title','Telefone oficial Directcall');child.style.setProperty('width','100%','important');child.style.setProperty('height','505px','important')}
+ document.getElementById('fallback').style.display='none';return true};
+const app=()=>window.jQuery?.directcall_app?.();
+function expand(){const provider=app();if(!provider||typeof provider.state!=='function')throw Error('Controle Directcall indisponível');provider.state(350,540);embed();setTimeout(embed,150);setTimeout(embed,400);}
+async function init(){try{if(typeof window.jQuery?.directcall_app!=='function')throw Error('Biblioteca Directcall não carregada');
+window.jQuery.directcall_app({state:'hide',clicktocall:false,habilitar_menu_chamadas:true,habilitar_menu_sms:false,habilitar_menu_mensagem_de_voz:false});
+if(typeof app()?.comando!=='function')throw Error('Comando Directcall não disponível');
+expand();set('Pronto');inform('ready');}
+catch(e){set('Erro');document.getElementById('fallback').textContent=String(e?.message||e);inform('error',{message:String(e?.message||e)})}}
+window.addEventListener('message',ev=>{if(ev.source!==window.parent||ev.origin!==location.origin)return;const m=ev.data;if(!m||m.source!=='central-operator')return;
+if(m.type==='expand'){try{expand();inform('expanded')}catch(e){inform('error',{message:String(e?.message||e)})}}
+if(m.type==='dial'){let error=null;try{
+if(!/^55[1-9]\d{9,10}$/.test(String(m.phone||'')))throw Error('Número inválido');
+const id=String(m.id||'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,70);
+const name=String(m.name||'').replace(/[|\r\n]/g,' ').slice(0,70);
+expand();app().comando('1|chamar|'+m.phone+'|'+id+'|'+name);
+}catch(e){error=String(e?.message||e)}
+inform('dial-ack',{requestId:String(m.requestId||''),ok:!error,message:error||'Comando entregue ao plugin, sem confirmação de atendimento'});
+}});
+const watcher=new MutationObserver(()=>{const root=document.getElementById('directcall-frame-web');if(root&&root.parentNode!==document.getElementById('screen'))embed()});
+watcher.observe(document.body,{childList:true});
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+</script></body></html>

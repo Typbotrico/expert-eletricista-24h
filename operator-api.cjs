@@ -171,6 +171,21 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
     return cleanContact(c)
    });return answer(res,200,{contact,meaning:'Contato liberado para uma única nova tentativa após confirmação de ausência de chamada ativa. Não disca automaticamente.'});
   }
+
+  if(pathname==='/api/operator/no-ring'&&req.method==='POST'){
+   const b=await parse(req);
+   if(b.checkedNoActiveCall!==true)return fail(res,422,'confirme_que_nenhuma_chamada_esta_ativa');
+   const c=await transactData(async d=>{
+    const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&['Comando enviado','Resultado desconhecido'].includes(x.status));
+    if(!c)throw Error('nenhuma_tentativa_para_revisar');
+    const camp=d.campaigns.find(x=>x.id===c.campaignId);
+    if(!camp?.isTest)throw Error('somente_lista_de_teste_autorizada');
+    if(!c.requestedAt||now()-Date.parse(c.requestedAt)<15000)throw Error('aguarde_15_segundos_antes_de_revisar');
+    c.result='Não chegou a ligar';c.finishedAt=clock();c.notes=(safe(c.notes)+' | Sem toque; operador verificou ausência de chamada ativa').trim().slice(0,1000);
+    c.owner=null;change(d,c,actor.id,'Não chegou a ligar','teste_sem_toque_encerrado_sem_rediscar');return cleanContact(c);
+   });
+   return answer(res,200,{contact:c,meaning:'A tentativa foi encerrada como sem toque. Não houve rediscagem e este contato não voltará automaticamente para a fila.'});
+  }
   if(pathname==='/api/operator/unknown'&&req.method==='POST'){
    const b=await parse(req);const c=await transactData(async d=>{const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&x.status==='Comando enviado');if(!c)throw Error('solicitacao_nao_encontrada');change(d,c,actor.id,'Resultado desconhecido','comando_nao_confirmado');return cleanContact(c)});return answer(res,200,{contact:c});
   }

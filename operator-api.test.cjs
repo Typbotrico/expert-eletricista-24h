@@ -320,3 +320,17 @@ test('Directcall browser mode is explicitly enforced rather than desktop and han
  const vm=require('node:vm');
  new vm.Script(raw[1],{filename:'telefone-inline.js'});
 });
+
+test('phone loads even when Rico has an unresolved recorded attempt',()=>{
+ const fs=require('node:fs'),vm=require('node:vm');
+ const src=fs.readFileSync(require('node:path').join(__dirname,'operador.js'),'utf8');
+ const m=src.match(/async function sdk\(force=false\)\{[\s\S]*?\n\}\nfunction expandPhone/);
+ assert.ok(m,'sdk implementation should be found');
+ assert.match(m[0],/const alreadyLoaded=!!frame\.getAttribute\('src'\)/);
+ assert.match(m[0],/if\(alreadyLoaded&&force&&staleAttempt\)/);
+ assert.doesNotMatch(m[0],/if\(staleAttempt\)\s*\{[^}]*return;/);
+ assert.match(m[0],/frame\.src='\/telefone\?ts='\+Date\.now\(\)/);
+ const manual=src.match(/\$\('checkSdk'\)\.onclick=([^;]+);/);
+ assert.ok(manual&&manual[1].includes('sdk(true)'), 'reconnect button should be an explicit user action');
+ new vm.Script(src,{filename:'operador.js'});
+});

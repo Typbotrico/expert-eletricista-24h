@@ -9,7 +9,7 @@ function setupUI(configured){$('auth').classList.remove('hidden');$('dashboard')
 const active=()=>view?.active||null;
 
 function insideCallHours(){const now=new Date(),wd=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now),tm=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);return !['Sat','Sun'].includes(wd)&&tm>='09:00'&&tm<'18:00'}
-let lastRequestedDial=null,vendorCallEnded=false,autoCampaignId=null,queuedHangup=null,autoHangupProcessing=false,hangupBridgeReady=false,hangupBridgeVersion='',hangupCallState='waiting',autoOptedOut=false;
+let lastRequestedDial=null,vendorCallEnded=false,autoCampaignId=null,queuedHangup=null,autoHangupProcessing=false,hangupBridgeReady=false,hangupBridgeVersion='',hangupCallState='waiting',autoOptedOut=false,autoSwitchInfo='';
 function easyRender(){
  if(!view)return;
  const admin=view.user.role==='admin',all=view.campaigns||[],chosen=all.find(c=>c.id===campaignId);
@@ -27,6 +27,7 @@ function easyRender(){
  $('easyStep1').style.borderColor=chosen?'#27856a':'#41678b';
  $('easyPhoneStatus').textContent=sdkReady?'✓ Plugin carregado, mas o login na Directcall ainda precisa ser conferido. Verifique “Via navegador” e a linha de origem no aparelho.':'Telefone carregando... Se não abrir, clique em “Mostrar telefone ao lado”.';
  $('easyPhoneStatus').classList.toggle('ok',sdkReady);
+ $('easySpeedStatus').textContent=autoSwitchInfo||'Tempo de avanço: será medido após a primeira ligação automática. A caixa postal continua ativa até a Directcall confirmar o fim da chamada.';
  const upcoming=list.find(x=>x.status==='Pendente')||list.find(x=>x.status==='Retornar'&&x.callbackAt&&Date.parse(x.callbackAt)<=Date.now());
  $('easyContact').textContent=c?c.name:chosen?(upcoming?upcoming.name:'Nenhum contato pendente nesta lista'):'Escolha uma lista acima';
  $('easyCallLabel').textContent=c?(c.status==='Reservado'?'Contato reservado':c.status==='Resultado desconhecido'?'Revisar chamada antes de avançar':'Ligação atual'):'Próxima ligação';
@@ -158,7 +159,10 @@ window.addEventListener('message',e=>{
   if(!lastRequestedDial||m.requestId!==lastRequestedDial.id||m.phone!==lastRequestedDial.phone)return;
   hangupCallState=m.state;
   if(m.version)hangupBridgeVersion=m.version;
-  if(m.state==='call-started')status('✓ Directcall sinalizou ligação em andamento para '+(active()?.name||'contato')+'. Modo automático aguardando desligamento.','good');
+  if(m.state==='call-started'){
+   if(!lastRequestedDial.startedAt)lastRequestedDial.startedAt=performance.now();
+   status('✓ Directcall sinalizou ligação em andamento para '+(active()?.name||'contato')+'. Modo automático aguardando desligamento.','good');
+  }
   show();
  }
  if(m.type==='error'){sdkReady=false;notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');status('O telefone não carregou. Abra o APP Directcall e verifique a configuração.','error');show();}
@@ -178,44 +182,66 @@ async function processQueuedHangup(){
  autoHangupProcessing=true;
  const event=queuedHangup;queuedHangup=null;
  try{
-  await refresh();
+  // O servidor valida atomicamente o contato ativo. Evite a consulta
+  // adicional ao banco que atrasava a passagem para a proxima ligacao.
   const c=active();
   if(!c||!lastRequestedDial||lastRequestedDial.id!==event.requestId||lastRequestedDial.contactId!==c.id||c.phone!==event.phone)return;
   if(!['Comando enviado','Resultado desconhecido'].includes(c.status)||vendorCallEnded)return;
-  // O aplicativo Directcall informa o encerramento tanto pelo detector
-  // correlacionado quanto pela propria janela oficial da operadora.
-  // Em ambos os casos o detector v0.5 deve ter confirmado o INICIO.
   const verifiedExtensionEnd=event.source==='directcall-hangup';
   const verifiedVendorEnd=event.source==='vendor-opener'&&Number.isFinite(lastRequestedDial.at)&&Date.now()-lastRequestedDial.at>=0&&Date.now()-lastRequestedDial.at<30*60*1000;
   if(autoCampaignId===c.campaignId&&((!verifiedExtensionEnd&&!verifiedVendorEnd)||hangupCallState!=='call-started')){
-   status('Aguardando confirmacao confiavel do encerramento pelo detector Directcall. Nenhuma nova ligacao sera iniciada.','warn');
+   status('Aguardando confirmação confiável do encerramento pela Directcall. Nenhuma ligação nova foi iniciada.','warn');
    return;
   }
   vendorCallEnded=true;
   $('easyEnded').checked=true;$('ended').checked=true;
   const camp=view.campaigns.find(x=>x.id===c.campaignId);
   if(autoCampaignId===c.campaignId&&camp?.isTest&&!camp.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady){
-   status('✓ Chamada com '+c.name+' encerrada. Registrando e iniciando o próximo número automaticamente...','good');
-   // A classificacao automatica pode ser salva sem o operador tocar
-   // no campo. Garantir a opcao mesmo em cache de HTML antigo.
-   const resultField=$('result');
-   if(!Array.from(resultField.options).some(o=>o.value==='A classificar'))resultField.add(new Option('A classificar','A classificar'));
-   resultField.value='A classificar';
-   if(resultField.value!=='A classificar')throw Error('Nao foi possivel registrar o resultado automatico');
-   // Executamos na mesma transação de interface; o servidor libera o contato
-   // atual ANTES de reservar o seguinte. Uma confirmação nunca inicia duas chamadas.
-   const outcome=await finishCurrent(true);
+   const receivedAt=performance.now(),callSeconds=lastRequestedDial.startedAt?Math.max(0,(receivedAt-lastRequestedDial.startedAt)/1000):null;
+   status('✓ Directcall encerrou '+c.name+'. Registrando o resultado e preparando o próximo contato...','good');
+   // Uma única gravação: encerra anterior e reserva seguinte.
+   // O servidor não faz chamadas telefônicas.
+   const advance=await request('auto-advance',{method:'POST',data:{contactId:c.id,campaignId:c.campaignId,providerHangupVerified:true}});
+   const queueSeconds=(performance.now()-receivedAt)/1000;
+   if(advance.finished?.id!==c.id||advance.next?.id===c.id)throw Error('Resposta inconsistente da fila; não houve nova discagem');
+   if(view){
+    view.contacts=view.contacts.map(item=>item.id===c.id?advance.finished:item.id===advance.next?.id?advance.next:item);
+    view.active=advance.next||null;
+   }
+   // Limpar a chamada antiga antes de preparar a nova.
+   vendorCallEnded=false;lastRequestedDial=null;hangupCallState='waiting';
+   $('result').value='';$('notes').value='';$('callbackAt').value='';$('ended').checked=false;
+   $('easyEnded').checked=false;$('returnBox').style.display='none';
+   if(!advance.next){
+    autoCampaignId=null;
+    autoSwitchInfo='Última transição: '+queueSeconds.toFixed(1)+'s para registrar o encerramento. Lista finalizada.'+(callSeconds!==null?' Chamada anterior durou '+callSeconds.toFixed(1)+'s.':'');
+    show();
+    status('✓ Lista concluída. O desligamento de '+c.name+' foi salvo; não existe próximo contato autorizado.','good');
+    return;
+   }
+   // O nome muda na tela assim que a proxima reserva chega.
+   show();
+   status('Próximo contato: '+advance.next.name+'. Preparando ligação no Directcall...','good');
+   const dialStart=performance.now();
+   try{await requestOneDial(advance.next)}
+   catch(e){throw Error('A ligação de '+c.name+' foi salva, mas a chamada para '+advance.next.name+' não foi confirmada. '+err(e))}
+   const dialSeconds=(performance.now()-dialStart)/1000;
+   autoSwitchInfo='Última troca após encerramento confirmado: '+(queueSeconds+dialSeconds).toFixed(1)+'s (fila '+queueSeconds.toFixed(1)+'s; envio Directcall '+dialSeconds.toFixed(1)+'s).'+(callSeconds!==null?' Chamada anterior: '+callSeconds.toFixed(1)+'s, incluindo eventual caixa postal.':'');
+   show();
+   status('✓ Ligação solicitada para '+advance.next.name+'. Tempo medido: '+(queueSeconds+dialSeconds).toFixed(1)+'s desde o encerramento confirmado.','good');
+   // Uma única consulta final para reconciliar o estado do servidor.
    await refresh();
-   if(outcome?.kind==='dial-sent')status('Automático: ligação para '+outcome.next+' solicitada. Aguardando encerramento real da Directcall.','good');
-   else{autoCampaignId=null;status('Automático: lista concluída ou nenhuma nova chamada foi iniciada.','good')}
   }else{
-   status('✓ A Directcall confirmou o fim da ligação com '+c.name+'. Toque no resultado para continuar ou inicie o modo automático.','good');
+   status('✓ A Directcall confirmou o fim da ligação com '+c.name+'. Selecione o resultado para continuar ou ative o modo automático.','good');
    show();
    if(document.body.classList.contains('easy-mode'))$('easyResultSection').scrollIntoView({behavior:'smooth',block:'nearest'});
   }
  }catch(e){
   autoCampaignId=null;
   status('Automação pausada para evitar ligações repetidas: '+err(e),'error');
+  // Nunca repetir um comando caso a transição tenha sido salva e
+  // a confirmação do aparelho tenha falhado.
+  try{await refresh()}catch{}
  }finally{
   autoHangupProcessing=false;
   if(queuedHangup&&!busy)Promise.resolve().then(processQueuedHangup);
@@ -308,7 +334,7 @@ $('easyResetTest').onclick=()=>action(async()=>{
  if(!window.confirm('RECOMEÇAR A LISTA '+camp.name+'? Confirme somente se voce ja DESLIGOU todas as chamadas no Directcall e NAO existe nenhuma chamada ativa. Os resultados e tentativas desta lista serao zerados. Historico administrativo e bloqueios permanecem. Nenhuma ligacao sera feita agora.'))return;
  const reset=await request('test-reset',{method:'POST',data:{campaignId:camp.id,confirmed:true,checkedNoActiveCall:true}});
  // Cancelar eventos antigos de encerramento antes de reiniciar a discagem.
- autoCampaignId=null;queuedHangup=null;vendorCallEnded=false;lastRequestedDial=null;hangupCallState='waiting';
+ autoCampaignId=null;queuedHangup=null;vendorCallEnded=false;lastRequestedDial=null;hangupCallState='waiting';autoSwitchInfo='';
  sequencePaused=false;
  $('easyAutoNext').checked=hangupBridgeReady&&!autoOptedOut;
  $('easyResumeFeedback').classList.add('hidden');

@@ -45,15 +45,16 @@ window.addEventListener('message',ev=>{if(ev.source!==window.parent||ev.origin!=
 if(m.type==='expand'){try{expand();inform('expanded')}catch(e){inform('error',{message:String(e?.message||e)})}}
 if(m.type==='dial'){let error=null;try{
 if(!/^55[1-9]\d{9,10}$/.test(String(m.phone||'')))throw Error('Número inválido');
-const id=String(m.id||'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,70);
-const name=String(m.name||'').replace(/[|\r\n]/g,' ').slice(0,70);
+const name=String(m.name||'Contato').replace(/[|\r\n]/g,' ').slice(0,70);
 const child=document.getElementById('directcall-app-web');
  if(!child?.contentWindow)throw Error('Telefone Directcall não terminou de carregar');
  expand();
  // The upstream plugin can silently switch to a local desktop softphone.
  // This Central explicitly uses Chrome WebRTC. Force app-web at send time.
  if(typeof window.settings_dc==='object'&&window.settings_dc!==null)window.settings_dc.sendTo='app-web';
- app().comando('1|chamar|'+m.phone+'|'+id+'|'+name);
+ // Official Directcall click-to-call format: 1|chamar|TELEFONE|NOME.
+ // A fifth field (contact ID) is not supported by the vendor's own call handler.
+ app().comando('1|chamar|'+m.phone+'|'+name);
 }catch(e){error=String(e?.message||e)}
 inform('dial-ack',{requestId:String(m.requestId||''),ok:!error,message:error||'Comando enviado ao APP WebRTC, ainda sem confirmação de toque ou áudio'});
 }});

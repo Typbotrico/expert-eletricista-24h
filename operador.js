@@ -181,9 +181,14 @@ $('easyPause').onclick=()=>{sequencePaused=!sequencePaused;show();status(sequenc
 $('easyRetry').onclick=()=>action(async()=>{
  const c=active();const chosen=view?.campaigns.find(x=>x.id===c?.campaignId);
  if(!c||!chosen?.isTest)throw Error('Este recurso é apenas para chamadas de teste autorizadas');
- if(!window.confirm('Antes de repetir: verifique na Directcall se NÃO há chamada ativa e se o celular NÃO tocou. Você já conferiu o aplicativo e o histórico?'))return;
- const result=await request('retry-test',{method:'POST',data:{contactId:c.id,checkedNoActiveCall:true}});
- status(c.name+' liberado para uma última tentativa de teste. Clique em COMEÇAR A LIGAR e confira o telefone. Nenhuma chamada foi disparada automaticamente.','good');
+ if(chosen.paused)throw Error('A campanha está pausada. Escolha Continuar antes de repetir.');
+ if(sequencePaused)throw Error('A fila está pausada. Clique em Continuar ligações.');
+ if(!sdkReady)throw Error('O telefone Directcall não carregou. Confira o aparelho e clique em Mostrar telefone.');
+ if(!window.confirm('Você conferiu na Directcall que não existe chamada ativa e que o celular NÃO tocou? Se confirmar, a Central vai TENTAR LIGAR agora para '+c.name+'.'))return;
+ const r=await request('retry-test',{method:'POST',data:{contactId:c.id,checkedNoActiveCall:true}});
+ status('Nova tentativa autorizada: enviando a ligação para '+c.name+'...');
+ await requestOneDial(r.contact);
+ status('Nova tentativa enviada ao telefone da Directcall para '+c.name+'. Veja se o aparelho mostra a discagem e se o celular toca.','good');
 });
 $('easyNoRing').onclick=()=>action(async()=>{
  const c=active();const chosen=view?.campaigns.find(x=>x.id===c?.campaignId);

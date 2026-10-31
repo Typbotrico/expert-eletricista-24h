@@ -165,7 +165,7 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
     const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&['Comando enviado','Resultado desconhecido'].includes(x.status));
     if(!c)throw Error('nenhuma_tentativa_para_revisar');
     const camp=d.campaigns.find(x=>x.id===c.campaignId);
-    if(!camp?.isTest||!canCall(camp,c)||c.attempts>=2)throw Error('repeticao_nao_autorizada');
+    if(!camp?.isTest||!canCall(camp,c)||c.attempts>=3)throw Error('repeticao_nao_autorizada');
     if(!c.requestedAt||now()-Date.parse(c.requestedAt)<15000)throw Error('aguarde_15_segundos_antes_de_revisar');
     c.status='Reservado';c.lastKey=null;log(d,actor.id,'repeticao_de_teste_autorizada_apos_conferencia',c.id);
     return cleanContact(c)

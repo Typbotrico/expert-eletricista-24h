@@ -37,6 +37,27 @@ function sendToBrowser(command){
  frame.contentWindow.postMessage(command,origin);
  return true;
 }
+// O app oficial responde {state:true} após processar api.cmd.
+// Isso confirma processamento do comando, não autenticação nem toque.
+let pendingVendorAck=null;
+window.addEventListener('message',e=>{
+ const f=document.getElementById('directcall-app-web');
+ if(e.source!==f?.contentWindow||e.origin!=='https://www.directcallsoft.com')return;
+ if(!e.data||typeof e.data!=='object'||e.data.state!==true||!pendingVendorAck)return;
+ const pending=pendingVendorAck;pendingVendorAck=null;clearTimeout(pending.timer);
+ inform(pending.type,{requestId:pending.id,ok:true,message:'APP recebeu e processou o comando; não confirma toque nem ligação atendida'});
+});
+function requestVendorAck(command,type,requestId){
+ if(pendingVendorAck)throw Error('Aguarde o comando anterior terminar');
+ if(!requestId)throw Error('Identificador da operação ausente');
+ const id=String(requestId).slice(0,100);
+ const timer=setTimeout(()=>{
+  if(!pendingVendorAck||pendingVendorAck.id!==id)return;
+  pendingVendorAck=null;inform(type,{requestId:id,ok:false,message:'O telefone Directcall não confirmou o processamento. Confira login e Via navegador no aplicativo.'});
+ },3600);
+ pendingVendorAck={id,type,timer};
+ try{sendToBrowser(command)}catch(e){clearTimeout(timer);pendingVendorAck=null;throw e;}
+}
 function expand(){const provider=app();if(!provider||typeof provider.state!=='function')throw Error('Controle Directcall indisponível');provider.state(350,540);embed();setTimeout(embed,150);setTimeout(embed,400);}
 async function init(){try{if(typeof window.jQuery?.directcall_app!=='function')throw Error('Biblioteca Directcall não carregada');
 window.jQuery.directcall_app({state:'open',clicktocall:false,habilitar_menu_chamadas:true,habilitar_menu_sms:false,habilitar_menu_mensagem_de_voz:false});
@@ -53,23 +74,24 @@ set('Iniciando');
 catch(e){set('Erro');document.getElementById('fallback').textContent=String(e?.message||e);inform('error',{message:String(e?.message||e)})}}
 window.addEventListener('message',ev=>{if(ev.source!==window.parent||ev.origin!==location.origin)return;const m=ev.data;if(!m||m.source!=='central-operator')return;
 if(m.type==='expand'){try{expand();inform('expanded')}catch(e){inform('error',{message:String(e?.message||e)})}}
-if(m.type==='probe'){let error=null;
- try{
-  sendToBrowser('0|status|Teste da Central|Se voce ve esta mensagem no telefone, a comunicacao com o aplicativo funciona.');
- }catch(e){error=String(e?.message||e)}
- inform('probe-ack',{requestId:String(m.requestId||''),ok:!error,message:error||'Aviso enviado ao aplicativo. Confira VISUALMENTE se apareceu; ainda não é confirmação do provedor.'});
+if(m.type==='probe'){try{
+ // O comando desconhecido "verificar" não inicia uma chamada. A aplicação
+ // atual responde {state:true} para indicar que recebeu a mensagem.
+ requestVendorAck('0|verificar|','probe-ack',m.requestId);
+ }catch(e){inform('probe-ack',{requestId:String(m.requestId||''),ok:false,message:String(e?.message||e)})}
 }
-if(m.type==='dial'){let error=null;try{
+if(m.type==='dial'){try{
 if(!/^55[1-9]\d{9,10}$/.test(String(m.phone||'')))throw Error('Número inválido');
 const name=String(m.name||'Contato').replace(/[|\r\n]/g,' ').slice(0,70);
-const child=document.getElementById('directcall-app-web');
- if(!child?.contentWindow)throw Error('Telefone Directcall não terminou de carregar');
- expand();
- // O método comando() do wrapper redireciona para app-desktop se detectar
- // software local. Para este painel de headset, use apenas o iframe WebRTC.
- sendToBrowser('1|chamar|'+m.phone+'|'+name);
-}catch(e){error=String(e?.message||e)}
-inform('dial-ack',{requestId:String(m.requestId||''),ok:!error,message:error||'Mensagem encaminhada ao iframe Directcall, sem confirmação de processamento, toque ou áudio'});
+const id=String(m.id||'').replace(/[^A-Za-z0-9_-]/g,'').slice(0,70);
+if(!id)throw Error('Identificador do contato ausente');
+expand();
+// O código real api.cmd do fornecedor só executa position=1 quando
+// "Ligar a partir do software integrado" (actionCall) está habilitado.
+// position=0 significa comando direto, acionado explicitamente pelo usuário.
+// Campos: posição | chamar | telefone | ID | nome.
+requestVendorAck('0|chamar|'+m.phone+'|'+id+'|'+name,'dial-ack',m.requestId);
+}catch(e){inform('dial-ack',{requestId:String(m.requestId||''),ok:false,message:String(e?.message||e)})}
 }});
 const watcher=new MutationObserver(()=>{const root=document.getElementById('directcall-frame-web');if(root&&root.parentNode!==document.getElementById('screen'))embed()});
 watcher.observe(document.body,{childList:true});

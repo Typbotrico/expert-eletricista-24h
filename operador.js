@@ -197,7 +197,7 @@ async function processQueuedHangup(){
   $('easyEnded').checked=true;$('ended').checked=true;
   const camp=view.campaigns.find(x=>x.id===c.campaignId);
   if(autoCampaignId===c.campaignId&&camp?.isTest&&!camp.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady){
-   const receivedAt=performance.now(),callSeconds=lastRequestedDial.startedAt?Math.max(0,(receivedAt-lastRequestedDial.startedAt)/1000):null;
+   const receivedAt=performance.now(),callSeconds=lastRequestedDial.startedAt?Math.max(0,(receivedAt-lastRequestedDial.startedAt)/1000):null,signalLabel=event.mode==='provider-channel-destroy'?'evento nativo de encerramento da Directcall':'atualização da tela da Directcall';
    status('✓ Directcall encerrou '+c.name+'. Registrando o resultado e preparando o próximo contato...','good');
    // Uma única gravação: encerra anterior e reserva seguinte.
    // O servidor não faz chamadas telefônicas.
@@ -227,6 +227,7 @@ async function processQueuedHangup(){
    catch(e){throw Error('A ligação de '+c.name+' foi salva, mas a chamada para '+advance.next.name+' não foi confirmada. '+err(e))}
    const dialSeconds=(performance.now()-dialStart)/1000;
    autoSwitchInfo='Última troca após encerramento confirmado: '+(queueSeconds+dialSeconds).toFixed(1)+'s (fila '+queueSeconds.toFixed(1)+'s; envio Directcall '+dialSeconds.toFixed(1)+'s).'+(callSeconds!==null?' Chamada anterior: '+callSeconds.toFixed(1)+'s, incluindo eventual caixa postal.':'');
+   autoSwitchInfo+=' Sinal de encerramento: '+signalLabel+'.';
    show();
    status('✓ Ligação solicitada para '+advance.next.name+'. Tempo medido: '+(queueSeconds+dialSeconds).toFixed(1)+'s desde o encerramento confirmado.','good');
    // Uma única consulta final para reconciliar o estado do servidor.

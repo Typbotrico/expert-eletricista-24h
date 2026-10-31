@@ -110,6 +110,7 @@ body.easy-mode #dashboard>div.flex.between p{display:none}
 <div class="easy-step-title"><span class="easy-circle">2</span><div><strong>Prepare o telefone</strong><small>Você fala pelo microfone e escuta no fone do computador</small></div></div>
 <div class="easy-status" id="easyPhoneStatus">Preparando o telefone...</div>
 <button id="easyPhoneButton" type="button" class="btn secondary easy-wide">☎ Mostrar telefone ao lado</button>
+<button id="easyProbe" type="button" class="btn secondary easy-wide">🔍 Verificar conexão sem ligar (grátis)</button>
 <p class="small muted">No Directcall, escolha <strong>Via navegador</strong>. O telefone fica à direita.</p>
 </div>
 <div class="easy-step" id="easyStep3">
@@ -138,7 +139,7 @@ body.easy-mode #dashboard>div.flex.between p{display:none}
 <section class="card" id="phoneCard"><div class="flex between"><div><h2>☎ Telefone integrado — Directcall</h2><p class="small muted">O telefone fica fixo nesta coluna, enquanto a fila permanece ao lado.</p></div><span class="pill">WebRTC no navegador</span></div>
 <div class="notice" id="sdkStatus">Preparando o plugin oficial da Directcall...</div>
 <div id="directcallDock" class="directcall-dock" aria-label="Telefone oficial Directcall integrado"><iframe id="phoneFrame" title="Telefone oficial Directcall — áudio no computador" allow="microphone; autoplay" referrerpolicy="same-origin" loading="eager"></iframe></div>
-<div class="actions"><button class="btn green" id="openPhone" type="button">☎ Mostrar telefone</button><button class="btn secondary" id="testMic" type="button">🎙 Testar microfone</button><button class="btn secondary" id="checkSdk" type="button">Reconectar interface</button><a class="btn secondary" href="https://painel.directcallsoft.com/login" target="_blank" rel="noopener noreferrer">Área Directcall</a></div>
+<div class="actions"><button class="btn green" id="openPhone" type="button">☎ Mostrar telefone</button><button class="btn secondary" id="testMic" type="button">🎙 Testar microfone</button><button class="btn secondary" id="checkSdk" type="button">Reconectar interface</button><button class="btn secondary" id="probePhone" type="button">🔍 Testar conexão sem chamar</button><a class="btn secondary" href="https://painel.directcallsoft.com/login" target="_blank" rel="noopener noreferrer">Área Directcall</a></div>
 <p class="small muted" id="micState">Teste de microfone local: não gravamos nem transmitimos áudio durante a verificação.</p>
 <p class="small muted">Use o headset, mantenha “Via navegador” no APP e fale com o contato nesta mesma tela. O plugin não confirma sozinho o encerramento: finalize no APP e registre o resultado antes da próxima ligação.</p></section>
 </div>

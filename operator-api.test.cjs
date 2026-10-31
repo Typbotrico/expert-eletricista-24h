@@ -366,3 +366,28 @@ test('Directcall inner app only automatically places call for position zero; pro
  assert.match(ui,/async function checkPhoneWithoutCall\(\)/);
  assert.match(ui,/type:'probe',requestId/);
 });
+
+test('one-tap result buttons save and start next only after confirmed provider hangup or operator verification',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ const phone=fs.readFileSync(path.join(__dirname,'telefone.html'),'utf8');
+ assert.equal((html.match(/data-call-result=/g)||[]).length,6);
+ for(const outcome of ['Atendeu','Não atendeu','Ocupado','Sem interesse','Retornar','Não ligar'])assert.match(html,new RegExp('data-call-result="'+outcome+'"'));
+ assert.match(html,/id="easyHangupNotice"/);
+ assert.match(ui,/if\(m\.type==='call-ended'\)/);
+ assert.match(ui,/m\.requestId!==lastRequestedDial\.id/);
+ assert.match(ui,/m\.phone!==c\.phone/);
+ assert.match(ui,/vendorCallEnded=true/);
+ assert.match(ui,/\$\('easyEnded'\)\.checked=true/);
+ assert.match(ui,/if\(!vendorCallEnded&&!window\.confirm/);
+ assert.match(ui,/await easyFinish\(true\)/);
+ const vendor=phone.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+ assert.ok(vendor);new vm.Script(vendor,{filename:'telefone-inline.js'});
+ assert.match(vendor,/e\.origin!=='https:\/\/www\.directcallsoft\.com'/);
+ assert.match(vendor,/message\.data==='Chamada encerrada!'/);
+ assert.match(vendor,/callEndedRelayed=true/);
+ assert.match(vendor,/inform\('call-ended'/);
+ assert.doesNotMatch(vendor,/message\.state===true.*inform\('call-ended'/);
+ new vm.Script(ui,{filename:'operador.js'});
+});

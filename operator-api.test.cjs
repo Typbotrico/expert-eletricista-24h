@@ -314,7 +314,9 @@ test('Directcall browser mode is explicitly enforced rather than desktop and han
  assert.match(html,/window\.settings_dc\.sendTo='app-web'/);
  assert.match(html,/await loaded/);
  assert.match(html,/await new Promise\(resolve=>setTimeout\(resolve,3300\)\)/);
- assert.match(html,/app\(\)\.comando\('1\|chamar\|'/);
+ assert.match(html,/app\(\)\.comando\('1\|chamar\|'\+m\.phone\+'\|'\+name\)/);
+ assert.doesNotMatch(html,/app\(\)\.comando\('1\|chamar\|'\+m\.phone\+'\|'\+id\+/);
+ assert.match(html,/mode:'app-web'/);
  const raw=html.match(/<script>([\s\S]*?)<\/script>/);
  assert.ok(raw);
  const vm=require('node:vm');
@@ -333,4 +335,15 @@ test('phone loads even when Rico has an unresolved recorded attempt',()=>{
  const manual=src.match(/\$\('checkSdk'\)\.onclick=([^;]+);/);
  assert.ok(manual&&manual[1].includes('sdk(true)'), 'reconnect button should be an explicit user action');
  new vm.Script(src,{filename:'operador.js'});
+});
+
+test('supervised retry initiates provider command only after confirming no active call',()=>{
+ const fs=require('node:fs'),src=fs.readFileSync(require('node:path').join(__dirname,'operador.js'),'utf8');
+ const onRetry=src.slice(src.indexOf("$('easyRetry').onclick="),src.indexOf("$('easyNoRing').onclick="));
+ assert.match(onRetry,/window\.confirm\(/);
+ assert.match(onRetry,/if\(!sdkReady\)/);
+ assert.match(onRetry,/await request\('retry-test'/);
+ assert.match(onRetry,/await requestOneDial\(r\.contact\)/);
+ assert.ok(onRetry.indexOf('window.confirm(')<onRetry.indexOf("await request('retry-test'"));
+ assert.ok(onRetry.indexOf("await request('retry-test'")<onRetry.indexOf('await requestOneDial(r.contact)'));
 });

@@ -200,7 +200,7 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
     const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&['Reservado','Comando enviado','Resultado desconhecido'].includes(x.status));
     if(!c)throw Error('contato_indisponivel');
     const camp=d.campaigns.find(x=>x.id===c.campaignId);
-    if(b.result==='A classificar'&&(!camp?.isTest||c.status!=='Comando enviado'))throw Error('classificacao_pendente_permitida_apenas_em_teste');
+    if(b.result==='A classificar'&&(!camp?.isTest||!['Comando enviado','Resultado desconhecido'].includes(c.status)))throw Error('classificacao_pendente_permitida_apenas_em_teste');
     c.result=b.result;c.notes=safe(b.notes).slice(0,1000);
     c.finishedAt=clock();c.callbackAt=b.result==='Retornar'?new Date(b.callbackAt).toISOString():null;c.owner=null;
     if(b.result==='A classificar'){c.reviewOwner=actor.id;c.notes=(c.notes+(b.providerHangupVerified===true?' | Encerramento informado pelo aplicativo Directcall; classificação pendente':' | Encerramento confirmado manualmente pelo operador; classificação pendente')).slice(0,1000);}

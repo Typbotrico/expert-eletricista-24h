@@ -492,6 +492,21 @@ test('outgoing hangup needs explicit Chrome detector and resume does not claim s
  new vm.Script(ui,{filename:'operador.js'});
 });
 
+test('native Directcall hangup after detector-confirmed start is accepted without extra operator clicks',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ assert.ok(ui.includes("e.origin!=='https://www.directcallsoft.com'"));
+ assert.ok(ui.includes("e.data.data!=='Chamada encerrada!'"));
+ assert.ok(ui.includes("hangupCallState!=='call-started'"));
+ assert.ok(ui.includes("source:'vendor-opener'"));
+ assert.ok(ui.includes("verifiedVendorEnd=event.source==='vendor-opener'"));
+ assert.ok(ui.includes("verifiedExtensionEnd=event.source==='directcall-hangup'"));
+ assert.ok(ui.includes("age>30*60*1000"),'Old native vendor messages must not advance the queue');
+ assert.ok(ui.includes("lastRequestedDial.contactId!==c.id"),'Previous call messages cannot advance the current contact');
+ assert.ok(ui.includes("await finishCurrent(true)"),'A verified end must advance to the next call');
+ new vm.Script(ui,{filename:'operador.js'});
+});
+
 test('verified automatic hangup can save pending classification without clicking the result',()=>{
  const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
  const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');

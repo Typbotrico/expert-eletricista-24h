@@ -183,3 +183,17 @@ test('test campaign cannot dial unapproved numbers even inside business hours',a
  await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);
  await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/lista_sem_contatos_pendentes/);
 });
+
+test('isolated Directcall phone is only served to authenticated operators and fits nested integration',async()=>{
+ const h=harness();
+ const no=await h.call('/telefone');
+ assert.equal(no.status,401);
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'ValidStrongPass123!'});
+ assert.equal(setup.status,201);
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const yes=await h.call('/telefone','GET',null,cookie);
+ assert.equal(yes.status,200);
+ assert.match(yes.headers['Content-Security-Policy'],/frame-ancestors 'self' https:\/\/central-de-ligacoes\.ricogisi\.chatgpt\.site/);
+ assert.match(yes.body,/source:'central-phone'/);
+ assert.match(yes.body,/m\.type==='dial'/);
+});

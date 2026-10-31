@@ -57,8 +57,11 @@ window.addEventListener('message',e=>{
   }
   return;
  }
- if(message&&typeof message==='object'&&message.data==='Chamada encerrada!'){
-  if(latestCallRequest&&(!message.requestId||message.requestId===latestCallRequest.id)&&(!message.phone||message.phone===latestCallRequest.phone)&&!callEndedRelayed&&Date.now()-latestCallRequest.at<7200000){
+ if(message&&typeof message==='object'&&message.source==='central-autofila-extension'&&message.type==='ended'&&message.data==='Chamada encerrada!'){
+  // Only the current vendor iframe plus matching request ID and phone may
+  // finish the automatic queue. A legacy vendor modal or unrelated popup
+  // must never trigger another PSTN call.
+  if(e.source===f?.contentWindow&&latestCallRequest&&message.requestId===latestCallRequest.id&&message.phone===latestCallRequest.phone&&!callEndedRelayed&&Date.now()-latestCallRequest.at<7200000){
    callEndedRelayed=true;
    inform('call-ended',{requestId:latestCallRequest.id,phone:latestCallRequest.phone,source:'directcall-hangup'});
   }

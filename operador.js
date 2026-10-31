@@ -185,7 +185,12 @@ async function processQueuedHangup(){
   const camp=view.campaigns.find(x=>x.id===c.campaignId);
   if(autoCampaignId===c.campaignId&&camp?.isTest&&!camp.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady){
    status('✓ Chamada com '+c.name+' encerrada. Registrando e iniciando o próximo número automaticamente...','good');
-   $('result').value='A classificar';
+   // A classificacao automatica pode ser salva sem o operador tocar
+   // no campo. Garantir a opcao mesmo em cache de HTML antigo.
+   const resultField=$('result');
+   if(!Array.from(resultField.options).some(o=>o.value==='A classificar'))resultField.add(new Option('A classificar','A classificar'));
+   resultField.value='A classificar';
+   if(resultField.value!=='A classificar')throw Error('Nao foi possivel registrar o resultado automatico');
    // Executamos na mesma transação de interface; o servidor libera o contato
    // atual ANTES de reservar o seguinte. Uma confirmação nunca inicia duas chamadas.
    const outcome=await finishCurrent(true);

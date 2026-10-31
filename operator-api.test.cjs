@@ -299,3 +299,17 @@ test('operator may safely close a no-ring attempt and proceed to next without au
  assert.equal(record.body.contacts[0].result,'Não chegou a ligar');
  assert.equal(record.body.contacts[0].attempts,1);
 });
+
+test('Directcall browser mode is explicitly enforced rather than desktop and handles async plugin startup',()=>{
+ const fs=require('node:fs'),html=fs.readFileSync(require('node:path').join(__dirname,'telefone.html'),'utf8');
+ assert.match(html,/directcall_app\(\{state:'open'/);
+ assert.doesNotMatch(html,/directcall_app\(\{state:'hide'/);
+ assert.match(html,/window\.settings_dc\.sendTo='app-web'/);
+ assert.match(html,/await loaded/);
+ assert.match(html,/await new Promise\(resolve=>setTimeout\(resolve,3300\)\)/);
+ assert.match(html,/app\(\)\.comando\('1\|chamar\|'/);
+ const raw=html.match(/<script>([\s\S]*?)<\/script>/);
+ assert.ok(raw);
+ const vm=require('node:vm');
+ new vm.Script(raw[1],{filename:'telefone-inline.js'});
+});

@@ -194,7 +194,7 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
   }
   if(pathname==='/api/operator/finish'&&req.method==='POST'){
    const b=await parse(req);if(b.ended!==true||!results.has(b.result))return fail(res,422,'confirmacao_encerramento_e_resultado_obrigatorios');
-   if(b.result==='A classificar'&&b.providerHangupVerified!==true)return fail(res,422,'encerramento_do_provedor_necessario');
+   if(b.result==='A classificar'&&b.providerHangupVerified!==true&&b.operatorHangupConfirmed!==true)return fail(res,422,'encerramento_do_provedor_ou_operador_necessario');
    if(b.result==='Retornar'&&(!b.callbackAt||Number.isNaN(Date.parse(b.callbackAt))||Date.parse(b.callbackAt)<now()||Date.parse(b.callbackAt)>now()+30*86400000))return fail(res,422,'data_de_retorno_invalida');
    const c=await transactData(async d=>{
     const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&['Reservado','Comando enviado','Resultado desconhecido'].includes(x.status));
@@ -203,7 +203,7 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
     if(b.result==='A classificar'&&(!camp?.isTest||c.status!=='Comando enviado'))throw Error('classificacao_pendente_permitida_apenas_em_teste');
     c.result=b.result;c.notes=safe(b.notes).slice(0,1000);
     c.finishedAt=clock();c.callbackAt=b.result==='Retornar'?new Date(b.callbackAt).toISOString():null;c.owner=null;
-    if(b.result==='A classificar'){c.reviewOwner=actor.id;c.notes=(c.notes+' | Encerramento informado pelo aplicativo Directcall; classificação pendente').slice(0,1000);}
+    if(b.result==='A classificar'){c.reviewOwner=actor.id;c.notes=(c.notes+(b.providerHangupVerified===true?' | Encerramento informado pelo aplicativo Directcall; classificação pendente':' | Encerramento confirmado manualmente pelo operador; classificação pendente')).slice(0,1000);}
     if(b.result==='Não ligar'&&!d.blocked.includes(c.phone))d.blocked.push(c.phone);
     change(d,c,actor.id,b.result,b.result==='A classificar'?'chamada_encerrada_classificacao_pendente':'chamada_classificada');
     return cleanContact(c);

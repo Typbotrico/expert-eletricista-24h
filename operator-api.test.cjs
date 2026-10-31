@@ -487,6 +487,58 @@ test('automatic test queue advances only after explicit opt-in and provider-end 
  assert.equal(state.body.blocked,1);
  await assert.rejects(()=>h.call('/api/operator/reclassify','POST',{contactId:id,result:'Atendeu'},cookie),/contato_nao_aguarda_classificacao/);
 });
+test('atomic hangup reserves without dialling the next authorised test contact',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const created=await h.call('/api/operator/test-list','POST',{name:'Tres testes',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907\nSamira;24981273160',consent:true},cookie);
+ const campaignId=created.body.campaign.id;
+ await h.call('/api/operator/pause','POST',{campaignId,paused:false},cookie);
+ const first=(await h.call('/api/operator/claim','POST',{campaignId},cookie)).body.contact;
+ await h.call('/api/operator/dial','POST',{contactId:first.id},cookie,'atomic-first-call-123456');
+ const bad=await h.call('/api/operator/auto-advance','POST',{campaignId,contactId:first.id,providerHangupVerified:false},cookie);
+ assert.equal(bad.status,422);
+ assert.equal((await h.call('/api/operator/auto-advance','POST',{campaignId,contactId:first.id,providerHangupVerified:true})).status,401);
+ const firstEnd=await h.call('/api/operator/auto-advance','POST',{campaignId,contactId:first.id,providerHangupVerified:true},cookie);
+ assert.equal(firstEnd.status,200);
+ assert.equal(firstEnd.body.finished.result,'A classificar');
+ assert.equal(firstEnd.body.next.name,'Igor');
+ assert.equal(firstEnd.body.next.status,'Reservado');
+ assert.equal(firstEnd.body.next.attempts,0,'Atomic reservation is not a phone call');
+ await assert.rejects(()=>h.call('/api/operator/auto-advance','POST',{campaignId,contactId:first.id,providerHangupVerified:true},cookie),/tentativa_atual_nao_encontrada/);
+ assert.equal((await h.call('/api/operator/claim','POST',{campaignId},cookie)).status,409);
+ await h.call('/api/operator/dial','POST',{contactId:firstEnd.body.next.id},cookie,'atomic-second-call-123456');
+ const secondEnd=await h.call('/api/operator/auto-advance','POST',{campaignId,contactId:firstEnd.body.next.id,providerHangupVerified:true},cookie);
+ assert.equal(secondEnd.body.next.name,'Samira');
+ assert.equal(secondEnd.body.next.attempts,0);
+ await h.call('/api/operator/dial','POST',{contactId:secondEnd.body.next.id},cookie,'atomic-third-call-123456');
+ const last=await h.call('/api/operator/auto-advance','POST',{campaignId,contactId:secondEnd.body.next.id,providerHangupVerified:true},cookie);
+ assert.equal(last.body.next,null);
+ const v=(await h.call('/api/operator/view','GET',null,cookie)).body;
+ assert.equal(v.active,null);
+ assert.equal(v.contacts.filter(c=>c.campaignId===campaignId&&c.status==='A classificar').length,3);
+ assert.deepEqual(v.contacts.filter(c=>c.campaignId===campaignId).map(c=>c.attempts),[1,1,1]);
+ assert.equal((await h.call('/api/operator/reclassify','POST',{contactId:first.id,result:'Atendeu'},cookie)).status,200);
+});
+
+test('fast auto mode updates next contact before provider acknowledgement and measures delay',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ assert.ok(html.includes('id="easySpeedStatus"'));
+ const start=ui.indexOf('async function processQueuedHangup(){');
+ const end=ui.indexOf('async function sdk(force=false){',start);
+ const handler=ui.slice(start,end);
+ assert.ok(start>0&&end>start);
+ assert.ok(handler.includes("await request('auto-advance'"));
+ assert.ok(!handler.includes('await finishCurrent(true)'));
+ assert.ok(!handler.includes('await refresh();\n  const c=active()'));
+ assert.ok(handler.indexOf('view.active=advance.next||null')<handler.indexOf('await requestOneDial(advance.next)'));
+ assert.ok(handler.includes('queueSeconds')&&handler.includes('dialSeconds'));
+ assert.ok(handler.includes("hangupCallState!=='call-started'"));
+ new vm.Script(ui,{filename:'operador.js'});
+});
+
 test('autonext frontend requires operator opt-in, test campaign, correlated vendor hangup and has fallback',()=>{
  const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
  const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
@@ -513,7 +565,7 @@ test('single Start click enables automatic test sequence; provider callback is q
  assert.match(ui,/queuedHangup=m/);
  assert.match(ui,/if\(queuedHangup&&!autoHangupProcessing\)Promise\.resolve\(\)\.then\(processQueuedHangup\)/);
  assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady\)/);
- assert.match(ui,/await finishCurrent\(true\)/);
+ assert.match(ui,/await request\('auto-advance'/);
  assert.match(ui,/if\(sequencePaused\)autoCampaignId=null/);
  assert.doesNotMatch(ui,/window\.confirm\('AUTORIZAR avanço automático/);
  new vm.Script(ui,{filename:'operador.js'});
@@ -568,7 +620,7 @@ test('native Directcall hangup after detector-confirmed start is accepted withou
  assert.ok(ui.includes("verifiedExtensionEnd=event.source==='directcall-hangup'"));
  assert.ok(ui.includes("age>30*60*1000"),'Old native vendor messages must not advance the queue');
  assert.ok(ui.includes("lastRequestedDial.contactId!==c.id"),'Previous call messages cannot advance the current contact');
- assert.ok(ui.includes("await finishCurrent(true)"),'A verified end must advance to the next call');
+ assert.ok(ui.includes("await request('auto-advance'"),'A verified end must use the atomic transition');
  new vm.Script(ui,{filename:'operador.js'});
 });
 
@@ -581,11 +633,11 @@ test('verified automatic hangup can save pending classification without clicking
  assert.ok(start>=0&&end>start,'The main result select must exist');
  const select=html.slice(start,end);
  assert.ok(select.includes('<option value="A classificar" hidden>'),'The main result select needs a pending-classification option');
- assert.ok(ui.includes("resultField.value='A classificar'"));
- assert.ok(ui.includes("if(resultField.value!=='A classificar')"));
- const assigned=ui.indexOf("resultField.value='A classificar'");
- const advance=ui.indexOf('await finishCurrent(true)',assigned);
- assert.ok(advance>assigned,'The auto classification must be prepared before saving and advancing');
+ assert.ok(ui.includes("await request('auto-advance'"));
+ assert.ok(ui.includes("view.active=advance.next||null"));
+ const reserved=ui.indexOf("view.active=advance.next||null");
+ const dial=ui.indexOf('await requestOneDial(advance.next)',reserved);
+ assert.ok(dial>reserved,'Render next contact before requesting the provider dial');
  new vm.Script(ui,{filename:'operador.js'});
 });
 

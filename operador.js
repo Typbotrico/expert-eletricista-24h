@@ -149,9 +149,10 @@ async function processQueuedHangup(){
    $('result').value='A classificar';
    // Executamos na mesma transação de interface; o servidor libera o contato
    // atual ANTES de reservar o seguinte. Uma confirmação nunca inicia duas chamadas.
-   await finishCurrent(true);
+   const outcome=await finishCurrent(true);
    await refresh();
-   status('Modo automático: aguardando o encerramento da próxima chamada; resultados ficam para classificar.','good');
+   if(outcome?.kind==='dial-sent')status('Automático: ligação para '+outcome.next+' solicitada. Aguardando encerramento real da Directcall.','good');
+   else{autoCampaignId=null;status('Automático: lista concluída ou nenhuma nova chamada foi iniciada.','good')}
   }else{
    status('✓ A Directcall confirmou o fim da ligação com '+c.name+'. Toque no resultado para continuar ou inicie o modo automático.','good');
    show();
@@ -254,8 +255,17 @@ $('easyResumeAuto').onclick=()=>action(async()=>{
  if(camp.paused){await request('pause',{method:'POST',data:{campaignId:c.campaignId,paused:false}});await refresh()}
  campaignId=c.campaignId;autoCampaignId=campaignId;$('easyAutoNext').checked=true;
  $('result').value='A classificar';$('ended').checked=true;
- await finishCurrent(true,true);
- status('Lista retomada automaticamente. Os resultados pendentes podem ser classificados depois.','good');
+ status('Encerrando a tentativa anterior de '+c.name+' e preparando o PRÓXIMO nome da lista...');
+ const advance=await finishCurrent(true,true);
+ if(advance?.kind==='dial-sent'){
+  status('Retomada: tentativa para '+advance.next+' enviada à Directcall. Aguarde o telefone de destino tocar.','good');
+ }else if(advance?.kind==='end-of-list'){
+  autoCampaignId=null;
+  status('A lista terminou. Nenhuma outra chamada foi iniciada.','good');
+ }else{
+  autoCampaignId=null;
+  status('Ligação anterior salva, mas a próxima não foi iniciada automaticamente. Confira o estado da fila.','warn');
+ }
 });
 $('easyStart').onclick=()=>action(async()=>{
  if(!sdkReady)throw Error('Abra o telefone e confira Via navegador antes de ligar');
@@ -384,11 +394,17 @@ async function finishCurrent(dialNext,operatorHangupConfirmed=false){
  if(!chosen||chosen.paused){status('Resultado salvo. Campanha pausada; não há próxima ligação.','good');return}
  let reserved;
  try{reserved=await request('claim',{method:'POST',data:{campaignId}})}
- catch(e){status('Resultado de '+c.name+' salvo. Nenhum próximo contato foi reservado ('+err(e)+').','good');return}
- if(!dialNext){status('Resultado salvo. Próximo contato: '+reserved.contact.name+'. Clique em Ligar quando estiver pronto.','good');return}
+ catch(e){
+  if(/lista sem contatos pendentes/.test(err(e))){status('Resultado de '+c.name+' salvo. A lista foi concluída ou não tem outro contato autorizado.','good');return {kind:'end-of-list',previous:c.name}}
+  throw Error('A ligação anterior foi salva, mas NÃO foi possível selecionar o próximo contato: '+err(e));
+ }
+ if(!reserved?.contact||reserved.contact.id===c.id)throw Error('A ligação anterior foi salva, mas a fila não apresentou um NOVO contato. A discagem foi bloqueada.');
+ status('Próximo contato: '+reserved.contact.name+' ('+reserved.contact.phone+'). '+(dialNext?'Solicitando ligação à Directcall...':'Aguardando início manual.'));
+ if(!dialNext)return {kind:'reserved',previous:c.name,next:reserved.contact.name};
  try{await requestOneDial(reserved.contact)}
- catch(e){status('Resultado anterior salvo. Próximo contato reservado, mas não foi discado: '+err(e),'warn');return}
- status('Resultado de '+c.name+' salvo. Próxima chamada solicitada para '+reserved.contact.name+'.','good');
+ catch(e){throw Error('A ligação anterior foi salva e '+reserved.contact.name+' foi reservado, MAS NÃO FOI DISCADO: '+err(e))}
+ status('Próxima ligação enviada à Directcall: '+reserved.contact.name+'. Confira se o telefone tocou.','good');
+ return {kind:'dial-sent',previous:c.name,next:reserved.contact.name};
 }
 $('stopQueue').onclick=()=>{sequencePaused=!sequencePaused;if(sequencePaused)autoCampaignId=null;show();status(sequencePaused?'Novas chamadas pausadas neste computador. A ligação atual não é interrompida.':'Fila retomada. Clique em Iniciar fila e ligar para continuar.','good')};
 $('startQueue').onclick=()=>action(beginQueueDial);

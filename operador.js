@@ -1,12 +1,42 @@
 'use strict';
 (()=>{const $=id=>document.getElementById(id),API='/api/operator/',KEY='central.operator.campaign.v1';
 let profile=null,view=null,campaignId='',sdkReady=false,sdkLoading=false,busy=false,sequencePaused=false;
-const status=(s,kind='')=>{const e=$('message');e.textContent=s;e.className='notice '+kind};
+const status=(s,kind='')=>{for(const id of ['message','easyNotice']){const e=$(id);if(e){e.textContent=s;e.className='notice '+kind}}};
 const notice=(id,s,kind='')=>{const e=$(id);e.textContent=s;e.className='notice '+kind};
 const err=e=>e?.message||String(e);
 async function request(path,{method='GET',data=null,key=null}={}){const opt={method,credentials:'same-origin',headers:{'Accept':'application/json'}};if(data!==null){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}if(key)opt.headers['Idempotency-Key']=key;const response=await fetch(API+path,opt);if(!response.ok){let msg='HTTP '+response.status;try{msg=(await response.json()).error||msg}catch{}throw Error(msg.replaceAll('_',' '))}return response.headers.get('content-type')?.includes('text/csv')?response.blob():response.json();}
 function setupUI(configured){$('auth').classList.remove('hidden');$('dashboard').classList.remove('ready');$('setupForm').classList.toggle('hidden',configured);$('loginForm').classList.toggle('hidden',!configured);$('recoveryForm').classList.add('hidden');notice('authMessage',configured?'Usuário: admin. Use a senha do primeiro cadastro ou recupere seu acesso.':'Primeiro acesso: crie a conta do administrador.');const fragment=new URLSearchParams(location.hash.replace(/^#/,''));if(!configured&&fragment.has('setup'))$('setupKey').value=fragment.get('setup');if(configured&&fragment.has('recuperar')){const code=fragment.get('recuperar');$('recoveryCode').value=code;$('loginForm').classList.add('hidden');$('recoveryForm').classList.remove('hidden');notice('authMessage','Recuperação autorizada: escolha uma nova senha de pelo menos 12 caracteres.','good');}if(fragment.has('recuperar')||fragment.has('setup'))history.replaceState(null,'',location.pathname+location.search);}
 const active=()=>view?.active||null;
+
+function easyRender(){
+ if(!view)return;
+ const admin=view.user.role==='admin',all=view.campaigns||[],chosen=all.find(c=>c.id===campaignId);
+ const list=view.contacts.filter(c=>c.campaignId===campaignId);
+ const c=active(),done=list.filter(x=>!['Pendente','Reservado','Comando enviado','Resultado desconhecido'].includes(x.status)).length;
+ const pending=list.filter(x=>x.status==='Pendente'||(x.status==='Retornar'&&x.callbackAt&&new Date(x.callbackAt).getTime()<=Date.now())).length;
+ const select=$('easyCampaign');
+ select.replaceChildren(new Option('Escolha uma lista...',''),...all.map(x=>new Option(x.name,x.id)));
+ select.value=chosen?campaignId:'';
+ $('easyImportDetails').style.display=admin?'block':'none';
+ $('easyCampaignInfo').textContent=chosen?(list.length+' contatos · '+done+' feitos · '+(chosen.isTest?'Teste com números autorizados':'Campanha comercial')+(chosen.paused?' · Aguardando início':'')):'Escolha uma lista. Se ainda não tiver uma, clique em “Quero colocar uma lista nova”.';
+ $('easyStep1').style.borderColor=chosen?'#27856a':'#41678b';
+ $('easyPhoneStatus').textContent=sdkReady?'✓ Telefone carregado. Confira “Via navegador” no aparelho ao lado.':'Telefone carregando... Se não abrir, clique em “Mostrar telefone ao lado”.';
+ $('easyPhoneStatus').classList.toggle('ok',sdkReady);
+ $('easyContact').textContent=c?c.name:chosen?(pending?'Tudo pronto para a próxima pessoa':'Nenhuma ligação pendente nesta lista'):'Escolha uma lista acima';
+ $('easyCallLabel').textContent=c?(c.status==='Reservado'?'Contato reservado':'Ligação atual'):'Próxima ligação';
+ $('easyPhoneNumber').textContent=c?c.phone:'';
+ $('easyProgress').textContent=done+' de '+list.length+' concluídos';
+ $('easyPause').textContent=sequencePaused?'▶ Continuar ligações':'⏸ Pausar ligações';
+ $('easyStart').textContent=c&&c.status==='Reservado'?'☎ LIGAR PARA ESTE CONTATO':'▶ COMEÇAR A LIGAR';
+ $('easyStart').disabled=busy||sequencePaused||!chosen||!sdkReady||(!!c&&c.status!=='Reservado')||(!c&&pending===0);
+ const canFinish=c&&['Comando enviado','Resultado desconhecido','Reservado'].includes(c.status);
+ $('easyResultSection').classList.toggle('hidden',!canFinish);
+ $('easySaveNext').disabled=busy||sequencePaused||!sdkReady||!canFinish||!$('easyEnded').checked||!$('easyResult').value||($('easyResult').value==='Retornar'&&!$('easyCallbackAt').value);
+ $('easySaveOnly').disabled=busy||!canFinish||!$('easyEnded').checked||!$('easyResult').value||($('easyResult').value==='Retornar'&&!$('easyCallbackAt').value);
+ $('easyPause').disabled=busy;
+ $('easyModeToggle').textContent=document.body.classList.contains('easy-mode')?'⚙ Ver opções avançadas':'← Voltar ao modo fácil';
+}
+
 function show(){if(!view)return;const campaigns=view.campaigns||[],chosen=campaigns.find(x=>x.id===campaignId);
 $('userLabel').textContent=view.user.name+' · '+(view.user.role==='admin'?'Administrador':'Operador');
 $('campaign').replaceChildren(new Option('Selecione a campanha',''),...campaigns.map(c=>new Option(c.name,c.id)));$('campaign').value=chosen?campaignId:'';
@@ -32,6 +62,7 @@ $('finishAndDial').disabled=busy||sequencePaused||!sdkReady||!c||!chosen||chosen
 $('stopQueue').textContent=sequencePaused?'▶ Retomar novas chamadas':'⏸ Pausar novas chamadas';
 if(sequencePaused)notice('queueStatus','Fila pausada neste navegador. Finalize o contato atual antes de sair. Nenhuma nova chamada será solicitada.','warn');
 const t=$('rows');t.replaceChildren();for(const x of list.slice(0,1000)){const tr=document.createElement('tr');for(const value of [x.name,x.phone,x.status,x.attempts,x.owner?view.users.find(u=>u.id===x.owner)?.name||'Reservado':'—']){const td=document.createElement('td');td.textContent=String(value??'');tr.appendChild(td)}t.appendChild(tr);}
+easyRender();
 }
 async function refresh(){view=await request('view');profile=view.user;const ids=new Set(view.campaigns.map(x=>x.id));if(!ids.has(campaignId)){campaignId=ids.has(localStorage.getItem(KEY))?localStorage.getItem(KEY):view.campaigns[0]?.id||''}$('auth').classList.add('hidden');$('dashboard').classList.add('ready');$('logout').classList.remove('hidden');show()}
 async function action(fn){if(busy)return;busy=true;show();try{await fn();await refresh()}catch(e){status('Erro: '+err(e),'error');console.warn('Central: operação não concluída')}finally{busy=false;show()}}
@@ -78,6 +109,53 @@ $('cancelRecovery').onclick=()=>{$('recoveryForm').classList.add('hidden');$('lo
 $('recoveryForm').onsubmit=async e=>{e.preventDefault();if($('recoveryPassword').value!==$('recoveryConfirm').value){notice('authMessage','As duas senhas estão diferentes.','error');return;}const b=$('submitRecovery');b.disabled=true;try{await request('reset-password',{method:'POST',data:{code:$('recoveryCode').value.trim(),password:$('recoveryPassword').value}});$('recoveryCode').value='';$('recoveryPassword').value='';$('recoveryConfirm').value='';$('recoveryForm').classList.add('hidden');$('loginForm').classList.remove('hidden');$('username').value='admin';$('password').focus();notice('authMessage','Senha redefinida. Entre com usuário admin e a nova senha. Nenhum contato foi perdido.','good')}catch(ex){notice('authMessage','Recuperação não concluída: '+err(ex),'error')}finally{b.disabled=false}};
 $('logout').onclick=async()=>{await request('logout',{method:'POST',data:{}});profile=null;view=null;sdkReady=false;$('phoneFrame').removeAttribute('src');$('logout').classList.add('hidden');setupUI(true)};
 $('campaign').onchange=e=>{campaignId=e.target.value;localStorage.setItem(KEY,campaignId);show()};
+
+$('easyModeToggle').onclick=()=>{document.body.classList.toggle('easy-mode');show();window.scrollTo({top:0,behavior:'smooth'})};
+$('easyCampaign').onchange=e=>{campaignId=e.target.value;localStorage.setItem(KEY,campaignId);show()};
+$('easyPhoneButton').onclick=()=>{$('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});try{if(sdkReady)expandPhone();else sdk()}catch(e){status('Não foi possível mostrar o telefone: '+err(e),'warn')}};
+$('easyFile').onchange=async()=>{
+ const file=$('easyFile').files[0];if(!file)return;
+ if(file.size>50000){status('Este teste aceita até cinco números. Escolha uma lista menor.','warn');$('easyFile').value='';return}
+ try{$('easyPaste').value=await file.text();$('easyImportDetails').open=true;status('Arquivo escolhido. Confira os nomes e marque a autorização antes de usar a lista.','good')}
+ catch(e){status('Não consegui ler o arquivo. Confira se é um CSV.','error')}
+};
+$('easyImport').onclick=()=>action(async()=>{
+ if(view?.user.role!=='admin')throw Error('Somente o administrador pode criar novas listas');
+ if(!$('easyConsent').checked)throw Error('Confirme a autorização dos destinatários');
+ const text=$('easyPaste').value.trim();
+ if(!text)throw Error('Escolha um arquivo CSV ou cole os contatos');
+ const r=await request('test-list',{method:'POST',data:{name:'Minha lista de teste',text,consent:true}});
+ campaignId=r.campaign.id;localStorage.setItem(KEY,campaignId);
+ $('easyPaste').value='';$('easyFile').value='';$('easyConsent').checked=false;$('easyImportDetails').open=false;
+ status('✓ Lista com '+r.count+' contatos pronta! Agora confira o telefone e clique em COMEÇAR A LIGAR.','good');
+});
+$('easyStart').onclick=()=>action(async()=>{
+ if(!sdkReady)throw Error('Abra o telefone e confira Via navegador antes de ligar');
+ if(sequencePaused)throw Error('Ligações pausadas. Clique em Continuar ligações');
+ let chosen=view?.campaigns.find(c=>c.id===campaignId);
+ if(!chosen)throw Error('Escolha sua lista no passo 1');
+ if(chosen.paused){await request('pause',{method:'POST',data:{campaignId,paused:false}});await refresh()}
+ await beginQueueDial();
+ status('Ligação solicitada. Quando terminar no Directcall, desligue, escolha o resultado e salve para ligar ao próximo.','good');
+});
+$('easyResult').onchange=()=>{$('easyReturnRow').classList.toggle('hidden',$('easyResult').value!=='Retornar');show()};
+$('easyEnded').onchange=()=>show();
+$('easyCallbackAt').onchange=()=>show();
+async function easyFinish(next){
+ if(!$('easyEnded').checked)throw Error('Primeiro desligue no Directcall e marque a confirmação');
+ if(!$('easyResult').value)throw Error('Escolha o resultado da ligação');
+ $('result').value=$('easyResult').value;
+ $('ended').checked=true;
+ $('callbackAt').value=$('easyCallbackAt').value;
+ if(!next)sequencePaused=true;
+ await finishCurrent(next);
+ $('easyResult').value='';$('easyEnded').checked=false;$('easyCallbackAt').value='';$('easyReturnRow').classList.add('hidden');
+ if(!next)status('Resultado salvo. Nenhuma nova chamada será feita até você continuar.','good');
+}
+$('easySaveNext').onclick=()=>action(()=>easyFinish(true));
+$('easySaveOnly').onclick=()=>action(()=>easyFinish(false));
+$('easyPause').onclick=()=>{sequencePaused=!sequencePaused;show();status(sequencePaused?'Fila pausada: ninguém será chamado até você continuar.':'Fila liberada. Clique em COMEÇAR A LIGAR para continuar.','good')};
+
 $('refresh').onclick=()=>action(async()=>{status('Atualizando lista...')});
 $('checkSdk').onclick=()=>sdk();
 $('gotoImport').onclick=()=>document.getElementById('quickUpload').scrollIntoView({behavior:'smooth',block:'start'});

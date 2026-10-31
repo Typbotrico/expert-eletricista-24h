@@ -167,7 +167,7 @@ $('easyRetry').onclick=()=>action(async()=>{
  if(!c||!chosen?.isTest)throw Error('Este recurso é apenas para chamadas de teste autorizadas');
  if(!window.confirm('Antes de repetir: verifique na Directcall se NÃO há chamada ativa e se o celular NÃO tocou. Você já conferiu o aplicativo e o histórico?'))return;
  const result=await request('retry-test',{method:'POST',data:{contactId:c.id,checkedNoActiveCall:true}});
- status('Rico ou contato selecionado liberado para uma única nova tentativa. Clique em COMEÇAR A LIGAR, depois confira o telefone. Nenhuma chamada foi disparada automaticamente.','good');
+ status(c.name+' liberado para uma última tentativa de teste. Clique em COMEÇAR A LIGAR e confira o telefone. Nenhuma chamada foi disparada automaticamente.','good');
 });
 
 

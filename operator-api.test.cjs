@@ -153,8 +153,10 @@ test('authorised 2-to-5 number list is safe, starts paused and advances without 
  x=await h.call('/api/operator/test-list','POST',payload,cookie);
  assert.equal(x.status,201);assert.equal(x.body.count,5);assert.equal(x.body.campaign.paused,true);
  const id=x.body.campaign.id;
- await assert.rejects(()=>h.call('/api/operator/test-list','POST',{name:'Sexto',consent:true,text:'Nome;Telefone\nSexto;24944443333\nSétimo;24933332222'},cookie),/limite_de_cinco_numeros_de_teste/);
- assert.equal(h.state().operatorV1.campaigns.length,1);
+ const amended=await h.call('/api/operator/test-list','POST',{name:'Lista atualizada',consent:true,text:'Nome;Telefone\nPrimeiro;24999998888\nSétimo;24933332222'},cookie);
+ assert.equal(amended.status,201);
+ assert.equal(amended.body.campaign.authorizedPhones.length,2);
+ assert.equal(h.state().operatorV1.campaigns.length,2);
  h.advance(10*3600000);
  await assert.rejects(()=>h.call('/api/operator/claim','POST',{campaignId:id},cookie),/campanha_indisponivel_ou_pausada/);
  await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);

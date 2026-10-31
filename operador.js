@@ -31,7 +31,7 @@ function easyRender(){
  $('easyActionHint').textContent=hint;
  const stuck=!!(c&&chosen?.isTest&&['Comando enviado','Resultado desconhecido'].includes(c.status));
  $('easyStuckActions').classList.toggle('hidden',!stuck);
- $('easyRetry').classList.toggle('hidden',!(stuck&&c.attempts<2));
+ $('easyRetry').classList.toggle('hidden',!(stuck&&c.attempts<3));
  $('easyRetry').disabled=busy;
  $('easyNoRing').disabled=busy;
  $('easyProgress').textContent=done+' de '+list.length+' concluídos';

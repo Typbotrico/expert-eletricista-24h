@@ -491,3 +491,16 @@ test('outgoing hangup needs explicit Chrome detector and resume does not claim s
  assert.ok(script);new vm.Script(script,{filename:'telefone-inline.js'});
  new vm.Script(ui,{filename:'operador.js'});
 });
+
+test('operator diagnosis distinguishes blocked attempt from reserved contact and never dials by itself',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ assert.match(html,/id="easyDialDiagnosis"/);
+ assert.match(ui,/['"]Comando enviado['"],['"]Resultado desconhecido['"]/);
+ assert.match(ui,/BLOQUEIO:/);
+ assert.match(ui,/CONTATO RESERVADO:/);
+ assert.match(ui,/Detector automático NÃO conectado/);
+ assert.match(ui,/\$\('easyDialDiagnosis'\)\.textContent=/);
+ new vm.Script(ui,{filename:'operador.js'});
+});

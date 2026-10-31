@@ -20,6 +20,9 @@ function easyRender(){
  select.replaceChildren(new Option('Escolha uma lista...',''),...all.map(x=>new Option(x.name,x.id)));
  select.value=chosen?campaignId:'';
  $('easyImportDetails').style.display=admin?'block':'none';
+ $('easyResetTest').classList.toggle('hidden',!admin||!chosen?.isTest);
+ $('easyResetHelp').classList.toggle('hidden',!admin||!chosen?.isTest);
+ $('easyResetTest').disabled=busy;
  $('easyCampaignInfo').textContent=chosen?(list.length+' contatos · '+done+' feitos · '+(chosen.isTest?'Teste com números autorizados':'Campanha comercial')+(chosen.paused?' · Aguardando início':'')):'Escolha uma lista. Se ainda não tiver uma, clique em “Quero colocar uma lista nova”.';
  $('easyStep1').style.borderColor=chosen?'#27856a':'#41678b';
  $('easyPhoneStatus').textContent=sdkReady?'✓ Plugin carregado, mas o login na Directcall ainda precisa ser conferido. Verifique “Via navegador” e a linha de origem no aparelho.':'Telefone carregando... Se não abrir, clique em “Mostrar telefone ao lado”.';
@@ -298,6 +301,18 @@ $('easyImport').onclick=()=>action(async()=>{
  campaignId=r.campaign.id;localStorage.setItem(KEY,campaignId);
  $('easyPaste').value='';$('easyFile').value='';$('easyConsent').checked=false;$('easyImportDetails').open=false;
  status('✓ Lista com '+r.count+' contatos pronta! Agora confira o telefone e clique em COMEÇAR A LIGAR.','good');
+});
+$('easyResetTest').onclick=()=>action(async()=>{
+ const camp=view?.campaigns.find(c=>c.id===campaignId);
+ if(view?.user.role!=='admin'||!camp?.isTest)throw Error('Escolha uma lista de teste autorizada');
+ if(!window.confirm('RECOMEÇAR A LISTA '+camp.name+'? Confirme somente se voce ja DESLIGOU todas as chamadas no Directcall e NAO existe nenhuma chamada ativa. Os resultados e tentativas desta lista serao zerados. Historico administrativo e bloqueios permanecem. Nenhuma ligacao sera feita agora.'))return;
+ const reset=await request('test-reset',{method:'POST',data:{campaignId:camp.id,confirmed:true,checkedNoActiveCall:true}});
+ // Cancelar eventos antigos de encerramento antes de reiniciar a discagem.
+ autoCampaignId=null;queuedHangup=null;vendorCallEnded=false;lastRequestedDial=null;hangupCallState='waiting';
+ sequencePaused=false;
+ $('easyAutoNext').checked=hangupBridgeReady&&!autoOptedOut;
+ $('easyResumeFeedback').classList.add('hidden');
+ status('Lista '+camp.name+' reiniciada: '+reset.reset+' contato(s) pendente(s), '+reset.blocked+' bloqueado(s). Contador zerado. Clique em COMEÇAR A LIGAR quando estiver pronto.','good');
 });
 $('easyResumeAuto').onclick=()=>action(async()=>{
  const info=$('easyResumeFeedback');

@@ -311,11 +311,13 @@ test('Directcall browser mode is explicitly enforced rather than desktop and han
  const fs=require('node:fs'),html=fs.readFileSync(require('node:path').join(__dirname,'telefone.html'),'utf8');
  assert.match(html,/directcall_app\(\{state:'open'/);
  assert.doesNotMatch(html,/directcall_app\(\{state:'hide'/);
- assert.match(html,/window\.settings_dc\.sendTo='app-web'/);
+ assert.match(html,/sendToBrowser\('0\|chamar\|'\+m\.phone\+'\|'\+id\+'\|'\+name\)/);
  assert.match(html,/await loaded/);
  assert.match(html,/await new Promise\(resolve=>setTimeout\(resolve,3300\)\)/);
- assert.match(html,/app\(\)\.comando\('1\|chamar\|'\+m\.phone\+'\|'\+name\)/);
- assert.doesNotMatch(html,/app\(\)\.comando\('1\|chamar\|'\+m\.phone\+'\|'\+id\+/);
+ assert.doesNotMatch(html,/app\(\)\.comando\('1\|chamar/);
+ assert.match(html,/requestVendorAck\('0\|chamar\|'/);
+ assert.match(html,/e\.data\.state!==true/);
+ assert.match(html,/requestVendorAck\('0\|verificar\|'/);
  assert.match(html,/mode:'app-web'/);
  const raw=html.match(/<script>([\s\S]*?)<\/script>/);
  assert.ok(raw);
@@ -346,4 +348,21 @@ test('supervised retry initiates provider command only after confirming no activ
  assert.match(onRetry,/await requestOneDial\(r\.contact\)/);
  assert.ok(onRetry.indexOf('window.confirm(')<onRetry.indexOf("await request('retry-test'"));
  assert.ok(onRetry.indexOf("await request('retry-test'")<onRetry.indexOf('await requestOneDial(r.contact)'));
+});
+
+test('Directcall inner app only automatically places call for position zero; probe is non-billable',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+ const html=fs.readFileSync(path.join(__dirname,'telefone.html'),'utf8');
+ const src=html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+ assert.ok(src);
+ new vm.Script(src,{filename:'telefone-inline.js'});
+ assert.match(src,/requestVendorAck\('0\|chamar\|'\+m\.phone\+'\|'\+id\+'\|'\+name/);
+ assert.match(src,/requestVendorAck\('0\|verificar\|','probe-ack'/);
+ assert.match(src,/e\.source!==f\?\.contentWindow/);
+ assert.match(src,/e\.origin!=='https:\/\/www\.directcallsoft\.com'/);
+ assert.doesNotMatch(src,/app\(\)\.comando\('1\|chamar/);
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ assert.match(ui,/if\(m\.type==='dial-ack'\|\|m\.type==='probe-ack'\)/);
+ assert.match(ui,/function checkPhoneWithoutCall\(\)/);
+ assert.match(ui,/type:'probe',requestId/);
 });

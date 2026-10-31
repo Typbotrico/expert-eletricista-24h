@@ -158,6 +158,19 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
    const b=await parse(req),key=safe(req.headers['idempotency-key']);if(!/^[A-Za-z0-9_-]{16,100}$/.test(key))return fail(res,422,'chave_de_operacao_obrigatoria');
    const c=await transactData(async d=>{const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id);if(!c)throw Error('contato_nao_reservado');if(c.lastKey===key)return cleanContact(c);if(c.status!=='Reservado'||c.attempts>=3)throw Error('ligacao_ja_solicitada_ou_limite_atingido');const camp=d.campaigns.find(x=>x.id===c.campaignId);if(!camp||camp.paused||!canCall(camp,c)||d.blocked.includes(c.phone))throw Error('discagem_bloqueada');c.attempts++;c.lastKey=key;c.requestedAt=clock();change(d,c,actor.id,'Comando enviado','solicitacao_reservada');return cleanContact(c)});return answer(res,200,{contact:c,meaning:'Permissao para enviar ao APP; NAO comprova chamada ou atendimento.'});
   }
+  if(pathname==='/api/operator/retry-test'&&req.method==='POST'){
+   const b=await parse(req);
+   if(b.checkedNoActiveCall!==true)return fail(res,422,'confirmacao_de_nenhuma_chamada_ativa_obrigatoria');
+   const contact=await transactData(async d=>{
+    const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&['Comando enviado','Resultado desconhecido'].includes(x.status));
+    if(!c)throw Error('nenhuma_tentativa_para_revisar');
+    const camp=d.campaigns.find(x=>x.id===c.campaignId);
+    if(!camp?.isTest||!canCall(camp,c)||c.attempts>=2)throw Error('repeticao_nao_autorizada');
+    if(!c.requestedAt||now()-Date.parse(c.requestedAt)<15000)throw Error('aguarde_15_segundos_antes_de_revisar');
+    c.status='Reservado';c.lastKey=null;log(d,actor.id,'repeticao_de_teste_autorizada_apos_conferencia',c.id);
+    return cleanContact(c)
+   });return answer(res,200,{contact,meaning:'Contato liberado para uma única nova tentativa após confirmação de ausência de chamada ativa. Não disca automaticamente.'});
+  }
   if(pathname==='/api/operator/unknown'&&req.method==='POST'){
    const b=await parse(req);const c=await transactData(async d=>{const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&x.status==='Comando enviado');if(!c)throw Error('solicitacao_nao_encontrada');change(d,c,actor.id,'Resultado desconhecido','comando_nao_confirmado');return cleanContact(c)});return answer(res,200,{contact:c});
   }

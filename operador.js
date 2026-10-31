@@ -28,6 +28,8 @@ function easyRender(){
  $('easyPhoneNumber').textContent=c?c.phone:(upcoming?.phone||'');
  const hint=!chosen?'1. Escolha uma lista de contatos.':!list.length?'Esta campanha está vazia. Importe a lista correta.':c&&c.status==='Comando enviado'?'Já existe uma tentativa registrada. Verifique se o telefone tocou antes de tentar de novo.':c&&c.status==='Resultado desconhecido'?'O comando não foi confirmado. Confira o histórico da Directcall antes de liberar este contato.':!sdkReady?'Telefone ainda não carregou. Clique em Mostrar telefone e entre na Directcall.':sequencePaused?'Chamadas pausadas. Clique em Continuar ligações.':!c&&!upcoming?'Não há contatos disponíveis para ligação nesta lista.':chosen.paused?'Ao clicar em COMEÇAR, a campanha será ativada e a primeira ligação será solicitada.':'Pronto para ligar para '+(c?.name||upcoming.name)+'.';
  $('easyActionHint').textContent=hint;
+ $('easyRetry').classList.toggle('hidden',!(c&&chosen?.isTest&&c.attempts<2&&['Comando enviado','Resultado desconhecido'].includes(c.status)));
+ $('easyRetry').disabled=busy;
  $('easyProgress').textContent=done+' de '+list.length+' concluídos';
  $('easyPause').textContent=sequencePaused?'▶ Continuar ligações':'⏸ Pausar ligações';
  $('easyStart').textContent=c&&c.status==='Reservado'?'☎ LIGAR PARA ESTE CONTATO':'▶ COMEÇAR A LIGAR';
@@ -159,6 +161,15 @@ async function easyFinish(next){
 $('easySaveNext').onclick=()=>action(()=>easyFinish(true));
 $('easySaveOnly').onclick=()=>action(()=>easyFinish(false));
 $('easyPause').onclick=()=>{sequencePaused=!sequencePaused;show();status(sequencePaused?'Fila pausada: ninguém será chamado até você continuar.':'Fila liberada. Clique em COMEÇAR A LIGAR para continuar.','good')};
+
+$('easyRetry').onclick=()=>action(async()=>{
+ const c=active();const chosen=view?.campaigns.find(x=>x.id===c?.campaignId);
+ if(!c||!chosen?.isTest)throw Error('Este recurso é apenas para chamadas de teste autorizadas');
+ if(!window.confirm('Antes de repetir: verifique na Directcall se NÃO há chamada ativa e se o celular NÃO tocou. Você já conferiu o aplicativo e o histórico?'))return;
+ const result=await request('retry-test',{method:'POST',data:{contactId:c.id,checkedNoActiveCall:true}});
+ status('Rico ou contato selecionado liberado para uma única nova tentativa. Clique em COMEÇAR A LIGAR, depois confira o telefone. Nenhuma chamada foi disparada automaticamente.','good');
+});
+
 
 $('refresh').onclick=()=>action(async()=>{status('Atualizando lista...')});
 $('checkSdk').onclick=()=>sdk();

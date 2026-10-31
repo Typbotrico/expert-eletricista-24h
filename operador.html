@@ -22,7 +22,49 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 #phoneCard{overflow:hidden}
 @media(max-width:650px){.directcall-dock,#phoneFrame{min-height:650px;height:650px}}
 @media(max-width:850px){.layout{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}@media(max-width:550px){header{padding:12px}.stats{gap:8px}.stat,.card{padding:14px}main{padding:18px 10px 55px}.stat strong{font-size:24px}.btn{padding:10px 12px}}
-</style></head><body>
+
+/* Modo fácil: prioridade para uma tarefa por vez; os controles completos
+   continuam disponíveis sem apagar configurações ou cadastros. */
+.mode-bar{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin:15px 0;font-weight:800;color:#d9eefa}
+#easyWorkspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(350px,0.9fr);gap:16px;align-items:start}
+.easy-panel{border:1px solid #436a8b;border-radius:18px;background:#0e2943;padding:18px;min-width:0}
+.easy-hello{padding:7px 4px 16px}.easy-hello h2{font-size:26px;margin:10px 0 3px}.easy-hello p{margin:0;color:#bfd7ec}
+.easy-number{font-size:12px;font-weight:850;border-radius:100px;padding:6px 12px;background:#154a76;color:#e0f4ff}
+.easy-step{margin-bottom:14px;padding:17px;border:1px solid #365c7c;background:#102e4c;border-radius:16px}
+.easy-step-title{display:flex;gap:12px;align-items:center;margin-bottom:14px}
+.easy-step-title strong{font-size:21px;line-height:1.2;display:block}
+.easy-step-title small{display:block;color:#b0cce3;font-size:13px;margin-top:3px}
+.easy-circle{background:#2c83e6;width:42px;height:42px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:22px;font-weight:850;color:white}
+.easy-sub{font-size:13px;color:#bdd7ea}
+.easy-details{border:1px solid #496e8c;border-radius:11px;padding:12px;margin-top:12px}
+.easy-details summary{cursor:pointer;font-weight:800;padding:5px 0;list-style:revert}
+.easy-details .field input,.easy-details .field textarea{background:#071c32;border-color:#6a91b1}
+.easy-status{padding:12px 14px;border-radius:12px;background:#153751;border:1px solid #466d8c;font-weight:700;margin-bottom:10px}
+.easy-status.ok{background:#124537;border-color:#23856d;color:#d6fff0}
+.easy-wide{width:100%;display:flex;text-align:center}
+.easy-primary{font-size:19px;min-height:60px;white-space:normal}
+.easy-current{background:#071d33;padding:15px;border-radius:11px;display:flex;flex-direction:column;gap:3px;margin:12px 0}
+.easy-current strong{font-size:21px;line-height:1.25;color:#f4f9ff;overflow-wrap:anywhere}
+.easy-current span{font-size:13px;color:#a9cbe3}
+.easy-result{border-top:1px solid #44627b;margin-top:18px;padding-top:15px}
+.easy-result button{margin:8px 0}
+.easy-confirm{font-size:15px;font-weight:700;margin:16px 0}
+.easy-actions{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;font-size:13px;color:#b6d1e5;margin-top:16px}
+body.easy-mode #dashboard>.stats,body.easy-mode #dashboard>.quicklinks,body.easy-mode #quickUpload,body.easy-mode #dashboard>.layout,body.easy-mode #dashboard>.card:not(#phoneCard){display:none!important}
+body.easy-mode #easyWorkspace{display:grid}
+body:not(.easy-mode) #easyPanel{display:none}
+body:not(.easy-mode) #easyWorkspace{display:block;max-width:800px;margin:0 auto 18px}
+body:not(.easy-mode) .mode-bar{justify-content:flex-end}
+body:not(.easy-mode) #dashboard>.layout{grid-template-columns:1fr 1fr}
+body.easy-mode #phoneCard{width:100%;margin:0}
+body.easy-mode #phoneCard .flex.between h2{font-size:19px}
+body.easy-mode #phoneCard .flex.between p{font-size:12px}
+body.easy-mode #dashboard>div.flex.between{margin-bottom:5px}
+body.easy-mode #dashboard>div.flex.between h1{font-size:25px}
+body.easy-mode #dashboard>div.flex.between p{display:none}
+@media(max-width:960px){#easyWorkspace{grid-template-columns:1fr}.mode-bar{margin:12px 0}body.easy-mode #phoneCard{max-width:700px}}
+@media(max-width:500px){.easy-step{padding:13px}.easy-panel{padding:12px}.easy-hello h2{font-size:23px}.easy-step-title strong{font-size:19px}.easy-primary{font-size:17px}}
+</style></head><body class="easy-mode">
 <header><div class="logo"><span class="mark">☎</span><div><div>CENTRAL DE LIGAÇÕES</div><div class="sub">Discador progressivo · Instituto Avance</div></div></div><div class="flex"><span id="userLabel" class="pill">Acesso protegido</span><button class="btn secondary hidden" id="logout">Sair</button></div></header>
 <main>
 <section id="auth" class="card"><h1>Entrar na Central</h1><p>Seus contatos e resultados ficam salvos no banco da Central; não dependem deste computador.</p>
@@ -46,6 +88,54 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 </section>
 <section id="dashboard">
 <div class="flex between"><div><h1>Atendimento em lista</h1><p>Uma chamada por vez, com bloqueio de duplicidades e resultados centralizados.</p></div><div class="pill">Operação protegida · 09h–18h, seg–sex</div></div>
+
+<div class="mode-bar"><span>✅ Modo fácil — só o necessário para ligar</span><button id="easyModeToggle" type="button" class="btn secondary">⚙ Ver opções avançadas</button></div>
+<div id="easyWorkspace">
+<section id="easyPanel" class="easy-panel" aria-label="Ligações passo a passo">
+<div class="easy-hello"><span class="easy-number">3 passos</span><h2>Vamos começar as ligações?</h2><p>Siga os números. Depois da primeira chamada, é só salvar e ligar para o próximo.</p></div>
+<div class="easy-step" id="easyStep1">
+<div class="easy-step-title"><span class="easy-circle">1</span><div><strong>Escolha a lista</strong><small>Use sua lista de contatos ou envie um CSV</small></div></div>
+<div class="field"><label for="easyCampaign">Lista que vamos ligar</label><select id="easyCampaign"><option value="">Escolher lista...</option></select></div>
+<p id="easyCampaignInfo" class="easy-sub">Nenhuma lista selecionada.</p>
+<details class="easy-details" id="easyImportDetails"><summary>📁 Quero colocar uma lista nova</summary>
+<div class="field"><label for="easyFile">Escolher arquivo CSV</label><input id="easyFile" type="file" accept=".csv,text/csv"></div>
+<div class="field"><label for="easyPaste">Ou cole: Nome;Telefone (um por linha)</label><textarea id="easyPaste" rows="4" placeholder="Rico;24993285944&#10;Igor;24992002907"></textarea></div>
+<label class="checkbox"><input id="easyConsent" type="checkbox"> Todos desta lista concordaram em receber as ligações de teste.</label>
+<button id="easyImport" type="button" class="btn green easy-wide">✔ Usar esta lista</button>
+<p class="small muted">Primeiro teste: 2 a 5 números autorizados. Para campanhas maiores, use Opções avançadas.</p>
+</details>
+</div>
+<div class="easy-step" id="easyStep2">
+<div class="easy-step-title"><span class="easy-circle">2</span><div><strong>Prepare o telefone</strong><small>Você fala pelo microfone e escuta no fone do computador</small></div></div>
+<div class="easy-status" id="easyPhoneStatus">Preparando o telefone...</div>
+<button id="easyPhoneButton" type="button" class="btn secondary easy-wide">☎ Mostrar telefone ao lado</button>
+<p class="small muted">No Directcall, escolha <strong>Via navegador</strong>. O telefone fica à direita.</p>
+</div>
+<div class="easy-step" id="easyStep3">
+<div class="easy-step-title"><span class="easy-circle">3</span><div><strong>Comece a ligar</strong><small>Uma pessoa por vez, na ordem da lista</small></div></div>
+<div class="easy-current"><span id="easyCallLabel">Próxima ligação</span><strong id="easyContact">Escolha sua lista acima</strong><span id="easyPhoneNumber"></span></div>
+<button id="easyStart" type="button" class="btn green easy-wide easy-primary">▶ COMEÇAR A LIGAR</button>
+<div class="easy-result" id="easyResultSection">
+<h3>Terminou a ligação?</h3>
+<div class="field"><label for="easyResult">Como foi?</label><select id="easyResult">
+<option value="">Escolha o resultado...</option><option>Atendeu</option><option>Não atendeu</option><option>Ocupado</option><option>Retornar</option><option>Sem interesse</option><option>Não ligar</option></select></div>
+<div class="field hidden" id="easyReturnRow"><label for="easyCallbackAt">Dia e hora para retornar</label><input id="easyCallbackAt" type="datetime-local"></div>
+<label class="checkbox easy-confirm"><input id="easyEnded" type="checkbox"> Já desliguei no telefone da Directcall</label>
+<button id="easySaveNext" type="button" class="btn green easy-wide easy-primary">✔ SALVAR E LIGAR PARA O PRÓXIMO</button>
+<button id="easySaveOnly" type="button" class="btn secondary easy-wide">Salvar e parar por agora</button>
+<p class="small muted">Antes de ligar para outra pessoa, você precisa desligar e marcar a confirmação acima.</p>
+</div>
+<div class="easy-actions"><button id="easyPause" type="button" class="btn secondary">⏸ Pausar ligações</button><span id="easyProgress">0 ligações feitas</span></div>
+</div>
+<div id="easyNotice" role="status" aria-live="polite" class="notice">Escolha uma lista para começar.</div>
+</section>
+<section class="card" id="phoneCard"><div class="flex between"><div><h2>☎ Telefone integrado — Directcall</h2><p class="small muted">O telefone fica fixo nesta coluna, enquanto a fila permanece ao lado.</p></div><span class="pill">WebRTC no navegador</span></div>
+<div class="notice" id="sdkStatus">Preparando o plugin oficial da Directcall...</div>
+<div id="directcallDock" class="directcall-dock" aria-label="Telefone oficial Directcall integrado"><iframe id="phoneFrame" title="Telefone oficial Directcall — áudio no computador" allow="microphone; autoplay" referrerpolicy="same-origin" loading="eager"></iframe></div>
+<div class="actions"><button class="btn green" id="openPhone" type="button">☎ Mostrar telefone</button><button class="btn secondary" id="testMic" type="button">🎙 Testar microfone</button><button class="btn secondary" id="checkSdk" type="button">Reconectar interface</button><a class="btn secondary" href="https://painel.directcallsoft.com/login" target="_blank" rel="noopener noreferrer">Área Directcall</a></div>
+<p class="small muted" id="micState">Teste de microfone local: não gravamos nem transmitimos áudio durante a verificação.</p>
+<p class="small muted">Use o headset, mantenha “Via navegador” no APP e fale com o contato nesta mesma tela. O plugin não confirma sozinho o encerramento: finalize no APP e registre o resultado antes da próxima ligação.</p></section>
+</div>
 <div class="stats"><div class="stat"><span>Total da campanha</span><strong id="total">0</strong></div><div class="stat"><span>Aguardando ligação</span><strong id="pending">0</strong></div><div class="stat"><span>Concluídos</span><strong id="finished">0</strong></div><div class="stat"><span>Não ligar</span><strong id="blocked">0</strong></div></div>
 <div class="quicklinks" aria-label="Acesso rápido à operação"><button class="btn secondary" id="gotoImport" type="button">📂 Importar lista CSV</button><button class="btn secondary" id="gotoPhone" type="button">☎ Ver telefone</button><button class="btn secondary" id="gotoQueue" type="button">▶ Ver fila de chamadas</button></div>
 <section id="quickUpload" class="card"><h2>1. Importar contatos e preparar campanha</h2>
@@ -63,12 +153,7 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 <div class="actions"><button class="btn" id="import">Importar contatos</button></div><p id="importStatus" class="small"></p>
 </section>
 <div class="layout"><div>
-<section class="card" id="phoneCard"><div class="flex between"><div><h2>☎ Telefone integrado — Directcall</h2><p class="small muted">O telefone fica fixo nesta coluna, enquanto a fila permanece ao lado.</p></div><span class="pill">WebRTC no navegador</span></div>
-<div class="notice" id="sdkStatus">Preparando o plugin oficial da Directcall...</div>
-<div id="directcallDock" class="directcall-dock" aria-label="Telefone oficial Directcall integrado"><iframe id="phoneFrame" title="Telefone oficial Directcall — áudio no computador" allow="microphone; autoplay" referrerpolicy="same-origin" loading="eager"></iframe></div>
-<div class="actions"><button class="btn green" id="openPhone" type="button">☎ Mostrar telefone</button><button class="btn secondary" id="testMic" type="button">🎙 Testar microfone</button><button class="btn secondary" id="checkSdk" type="button">Reconectar interface</button><a class="btn secondary" href="https://painel.directcallsoft.com/login" target="_blank" rel="noopener noreferrer">Área Directcall</a></div>
-<p class="small muted" id="micState">Teste de microfone local: não gravamos nem transmitimos áudio durante a verificação.</p>
-<p class="small muted">Use o headset, mantenha “Via navegador” no APP e fale com o contato nesta mesma tela. O plugin não confirma sozinho o encerramento: finalize no APP e registre o resultado antes da próxima ligação.</p></section>
+
 <section class="card"><h2>Campanha</h2><div class="field"><label for="campaign">Selecione uma campanha</label><select id="campaign"></select></div><div class="notice" id="campaignStatus">Selecione a campanha.</div>
 <p class="small" id="campaignInfo">Escolha uma campanha para ver quantidade de contatos e tipo de operação.</p>
 <div class="actions"><button class="btn green" id="toggleCampaign" type="button">Ativar campanha</button><button class="btn secondary" id="refresh" type="button">Atualizar lista</button><button class="btn secondary" id="download" type="button">Exportar CSV</button></div>

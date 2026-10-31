@@ -192,6 +192,37 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
   if(pathname==='/api/operator/skip'&&req.method==='POST'){
    const b=await parse(req);const c=await transactData(async d=>{const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&x.status==='Reservado');if(!c)throw Error('nao_pode_pular_chamada_solicitada');c.owner=null;c.finishedAt=clock();change(d,c,actor.id,'Pulado','contato_pulado');return cleanContact(c)});return answer(res,200,{contact:c});
   }
+  // Recover one historical call and reserve the NEXT authorised test contact atomically.
+  // Never sends a PSTN request: the authenticated browser must separately dial next.
+  if(pathname==='/api/operator/resume-verified'&&req.method==='POST'){
+   const b=await parse(req);
+   if(b.endedConfirmed!==true||b.noActiveCall!==true)return fail(res,422,'confirmacao_de_encerramento_obrigatoria');
+   const current=data().contacts.find(x=>x.id===b.contactId&&x.owner===actor.id);
+   if(!current||current.campaignId!==b.campaignId||!['Comando enviado','Resultado desconhecido'].includes(current.status))
+    return fail(res,409,'tentativa_pendente_nao_encontrada');
+   const selected=data().campaigns.find(x=>x.id===current.campaignId);
+   if(!selected?.isTest)return fail(res,403,'somente_lista_de_teste_autorizada');
+   if(selected.paused&&actor.role!=='admin')return fail(res,409,'campanha_pausada_pelo_administrador');
+   const result=await transactData(async d=>{
+    const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&x.campaignId===b.campaignId&&['Comando enviado','Resultado desconhecido'].includes(x.status));
+    if(!c)throw Error('tentativa_pendente_nao_encontrada');
+    const camp=d.campaigns.find(x=>x.id===c.campaignId);
+    if(!camp?.isTest)throw Error('somente_lista_de_teste_autorizada');
+    if(camp.paused){
+     if(actor.role!=='admin')throw Error('campanha_pausada_pelo_administrador');
+     camp.paused=false;log(d,actor.id,'campanha_de_teste_reativada_por_retomada');
+    }
+    c.result='A classificar';c.finishedAt=clock();c.callbackAt=null;c.owner=null;c.reviewOwner=actor.id;
+    c.notes=(safe(c.notes)+' | Operador confirmou no painel o encerramento da tentativa antes de retomar').trim().slice(0,1000);
+    change(d,c,actor.id,'A classificar','chamada_encerrada_por_confirmacao_para_retomada');
+    const next=d.contacts.find(x=>x.campaignId===camp.id&&x.id!==c.id&&canCall(camp,x)&&!d.blocked.includes(x.phone)&&(x.status==='Pendente'||(x.status==='Retornar'&&x.callbackAt&&Date.parse(x.callbackAt)<=now()&&x.attempts<3)));
+    if(next){
+     next.owner=actor.id;next.reservedAt=clock();change(d,next,actor.id,'Reservado','proximo_contato_reservado_apos_retomada');
+    }
+    return {finished:cleanContact(c),next:next?cleanContact(next):null};
+   });
+   return answer(res,200,{...result,meaning:'Tentativa antiga encerrada e próximo contato reservado na mesma operação. Nenhuma chamada enviada ao provedor.'});
+  }
   if(pathname==='/api/operator/finish'&&req.method==='POST'){
    const b=await parse(req);if(b.ended!==true||!results.has(b.result))return fail(res,422,'confirmacao_encerramento_e_resultado_obrigatorios');
    if(b.result==='A classificar'&&b.providerHangupVerified!==true&&b.operatorHangupConfirmed!==true)return fail(res,422,'encerramento_do_provedor_ou_operador_necessario');

@@ -428,10 +428,46 @@ test('autonext frontend requires operator opt-in, test campaign, correlated vend
  const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
  assert.match(html,/id="easyAutoNext"/);
  assert.match(html,/id="reviewItems"/);
- assert.match(ui,/if\(\$\('easyAutoNext'\)\.checked&&!sequencePaused&&!busy&&sdkReady&&view\?\.campaigns\.find/);
+ assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady\)/);
  assert.match(ui,/lastRequestedDial\.contactId!==c\.id/);
  assert.match(ui,/providerHangupVerified:callResult==='A classificar'&&vendorCallEnded/);
- assert.match(ui,/window\.confirm\('AUTORIZAR avanço automático/);
+ assert.match(ui,/autoCampaignId=chosen\.isTest&&\$\('easyAutoNext'\)\.checked\?campaignId:null/);
  assert.match(ui,/await request\('reclassify'/);
  new vm.Script(ui,{filename:'operador.js'});
+});
+
+test('single Start click enables automatic test sequence; provider callback is queued until state is up to date',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ assert.match(html,/id="easyAutoNext" type="checkbox" checked/);
+ assert.match(html,/id="easyResumeAuto"/);
+ assert.match(ui,/autoCampaignId=chosen\.isTest&&\$\('easyAutoNext'\)\.checked\?campaignId:null/);
+ assert.match(ui,/async function processQueuedHangup\(\)/);
+ assert.match(ui,/if\(busy\|\|autoHangupProcessing\|\|!queuedHangup\)return/);
+ assert.match(ui,/queuedHangup=m/);
+ assert.match(ui,/if\(queuedHangup&&!autoHangupProcessing\)Promise\.resolve\(\)\.then\(processQueuedHangup\)/);
+ assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady\)/);
+ assert.match(ui,/await finishCurrent\(true\)/);
+ assert.match(ui,/if\(sequencePaused\)autoCampaignId=null/);
+ assert.doesNotMatch(ui,/window\.confirm\('AUTORIZAR avanço automático/);
+ new vm.Script(ui,{filename:'operador.js'});
+});
+test('pending outcome may be registered with one explicit operator hangup confirmation for recovery',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const camp=await h.call('/api/operator/test-list','POST',{name:'Auto teste',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907',consent:true},cookie);
+ const id=camp.body.campaign.id;
+ await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);
+ const c=(await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).body.contact;
+ await h.call('/api/operator/dial','POST',{contactId:c.id},cookie,'unique-dial-manual-123456');
+ let fail=await h.call('/api/operator/finish','POST',{contactId:c.id,result:'A classificar',ended:true},cookie);
+ assert.equal(fail.status,422);
+ const done=await h.call('/api/operator/finish','POST',{contactId:c.id,result:'A classificar',ended:true,operatorHangupConfirmed:true},cookie);
+ assert.equal(done.status,200);
+ assert.equal(done.body.contact.result,'A classificar');
+ const next=await h.call('/api/operator/claim','POST',{campaignId:id},cookie);
+ assert.equal(next.status,200);
+ assert.equal(next.body.contact.name,'Igor');
 });

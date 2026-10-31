@@ -256,6 +256,31 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
    });
    return answer(res,200,{...result,meaning:'Tentativa antiga encerrada e próximo contato reservado na mesma operação. Nenhuma chamada enviada ao provedor.'});
   }
+  // Fast path for an already-observed provider hangup in an authorised TEST campaign.
+  // Finish and reserve next contact in one durable transaction. NEVER dials PSTN here.
+  // A new call still needs the explicit browser session that started the test and
+  // its independent provider command. Invalid/replayed events cannot reserve twice.
+  if(pathname==='/api/operator/auto-advance'&&req.method==='POST'){
+   const b=await parse(req);
+   if(b.providerHangupVerified!==true)return fail(res,422,'encerramento_do_provedor_obrigatorio');
+   const previous=await transactData(async d=>{
+    const c=d.contacts.find(x=>x.id===b.contactId&&x.owner===actor.id&&x.campaignId===b.campaignId&&['Comando enviado','Resultado desconhecido'].includes(x.status));
+    if(!c)throw Error('tentativa_atual_nao_encontrada');
+    const camp=d.campaigns.find(x=>x.id===c.campaignId);
+    if(!camp?.isTest||camp.paused||!canCall(camp,c))throw Error('somente_campanha_de_teste_ativa_autorizada');
+    const another=d.contacts.find(x=>x.owner===actor.id&&x.id!==c.id&&['Reservado','Comando enviado','Resultado desconhecido'].includes(x.status));
+    if(another)throw Error('outra_chamada_reservada');
+    c.result='A classificar';c.finishedAt=clock();c.callbackAt=null;c.owner=null;c.reviewOwner=actor.id;
+    c.notes=(safe(c.notes)+' | Encerramento informado pela Directcall; classificação pendente').trim().slice(0,1000);
+    change(d,c,actor.id,'A classificar','chamada_encerrada_classificacao_pendente');
+    const next=d.contacts.find(x=>x.campaignId===camp.id&&x.id!==c.id&&canCall(camp,x)&&!d.blocked.includes(x.phone)&&(x.status==='Pendente'||(x.status==='Retornar'&&x.callbackAt&&Date.parse(x.callbackAt)<=now()&&x.attempts<3)));
+    if(next){
+     next.owner=actor.id;next.reservedAt=clock();change(d,next,actor.id,'Reservado','proximo_contato_reservado_apos_encerramento');
+    }
+    return {finished:cleanContact(c),next:next?cleanContact(next):null};
+   });
+   return answer(res,200,{...previous,meaning:'Chamada finalizada e próximo número somente reservado. Nenhuma nova chamada foi discada pelo servidor.'});
+  }
   if(pathname==='/api/operator/finish'&&req.method==='POST'){
    const b=await parse(req);if(b.ended!==true||!results.has(b.result))return fail(res,422,'confirmacao_encerramento_e_resultado_obrigatorios');
    if(b.result==='A classificar'&&b.providerHangupVerified!==true&&b.operatorHangupConfirmed!==true)return fail(res,422,'encerramento_do_provedor_ou_operador_necessario');

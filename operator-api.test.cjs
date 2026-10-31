@@ -428,10 +428,10 @@ test('autonext frontend requires operator opt-in, test campaign, correlated vend
  const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
  assert.match(html,/id="easyAutoNext"/);
  assert.match(html,/id="reviewItems"/);
- assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady\)/);
+ assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady\)/);
  assert.match(ui,/lastRequestedDial\.contactId!==c\.id/);
  assert.match(ui,/providerHangupVerified:callResult==='A classificar'&&vendorCallEnded/);
- assert.match(ui,/autoCampaignId=chosen\.isTest&&\$\('easyAutoNext'\)\.checked\?campaignId:null/);
+ assert.match(ui,/autoCampaignId=chosen\.isTest&&\$\('easyAutoNext'\)\.checked&&hangupBridgeReady\?campaignId:null/);
  assert.match(ui,/await request\('reclassify'/);
  new vm.Script(ui,{filename:'operador.js'});
 });
@@ -442,12 +442,12 @@ test('single Start click enables automatic test sequence; provider callback is q
  const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
  assert.match(html,/id="easyAutoNext" type="checkbox" checked/);
  assert.match(html,/id="easyResumeAuto"/);
- assert.match(ui,/autoCampaignId=chosen\.isTest&&\$\('easyAutoNext'\)\.checked\?campaignId:null/);
+ assert.match(ui,/autoCampaignId=chosen\.isTest&&\$\('easyAutoNext'\)\.checked&&hangupBridgeReady\?campaignId:null/);
  assert.match(ui,/async function processQueuedHangup\(\)/);
  assert.match(ui,/if\(busy\|\|autoHangupProcessing\|\|!queuedHangup\)return/);
  assert.match(ui,/queuedHangup=m/);
  assert.match(ui,/if\(queuedHangup&&!autoHangupProcessing\)Promise\.resolve\(\)\.then\(processQueuedHangup\)/);
- assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady\)/);
+ assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady\)/);
  assert.match(ui,/await finishCurrent\(true\)/);
  assert.match(ui,/if\(sequencePaused\)autoCampaignId=null/);
  assert.doesNotMatch(ui,/window\.confirm\('AUTORIZAR avanço automático/);
@@ -470,4 +470,24 @@ test('pending outcome may be registered with one explicit operator hangup confir
  const next=await h.call('/api/operator/claim','POST',{campaignId:id},cookie);
  assert.equal(next.status,200);
  assert.equal(next.body.contact.name,'Igor');
+});
+
+test('outgoing hangup needs explicit Chrome detector and resume does not claim success on failure',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ const tel=fs.readFileSync(path.join(__dirname,'telefone.html'),'utf8');
+ assert.match(ui,/hangupBridgeReady=false/);
+ assert.match(ui,/if\(m\.type==='hangup-bridge-ready'\)/);
+ assert.match(ui,/hangupBridgeReady=true/);
+ assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady\)/);
+ assert.match(ui,/const advance=await finishCurrent\(true,true\)/);
+ assert.match(ui,/if\(advance\?\.kind==='dial-sent'\)/);
+ assert.match(ui,/throw Error\('A ligação anterior foi salva, mas NÃO foi possível selecionar o próximo contato/);
+ assert.match(tel,/source:'central-extension',type:'call-intent'/);
+ assert.match(tel,/inform\('hangup-bridge-ready'/);
+ assert.match(tel,/message\.requestId===latestCallRequest\.id/);
+ assert.match(tel,/message\.phone===latestCallRequest\.phone/);
+ const script=tel.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+ assert.ok(script);new vm.Script(script,{filename:'telefone-inline.js'});
+ new vm.Script(ui,{filename:'operador.js'});
 });

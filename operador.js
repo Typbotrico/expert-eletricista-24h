@@ -105,9 +105,17 @@ const t=$('rows');t.replaceChildren();for(const x of list.slice(0,1000)){const t
 easyRender();
 }
 async function refresh(){view=await request('view');profile=view.user;const ids=new Set(view.campaigns.map(x=>x.id));if(!ids.has(campaignId)){campaignId=ids.has(localStorage.getItem(KEY))?localStorage.getItem(KEY):view.campaigns[0]?.id||''}$('auth').classList.add('hidden');$('dashboard').classList.add('ready');$('logout').classList.remove('hidden');show()}
-async function action(fn){if(busy)return;busy=true;show();try{await fn();await refresh()}catch(e){status('Erro: '+err(e),'error');console.warn('Central: operação não concluída')}finally{busy=false;show()}}
+async function action(fn){if(busy)return;busy=true;show();try{await fn();await refresh()}catch(e){status('Erro: '+err(e),'error');console.warn('Central: operação não concluída')}finally{busy=false;show();if(queuedHangup&&!autoHangupProcessing)Promise.resolve().then(processQueuedHangup)}}
 async function script(src){return new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(Error('Não foi possível carregar a biblioteca '+src));document.head.append(s)})}
 const pendingPhoneCalls=new Map();
+// Quando o APP oficial é aberto numa janela filha, envia o aviso ao opener,
+// que pode ser esta página (em vez do quadro do telefone).
+window.addEventListener('message',e=>{
+ if(e.origin!=='https://www.directcallsoft.com'&&e.origin!=='https://directcallsoft.com')return;
+ if(!e.data||e.data.data!=='Chamada encerrada!'||!lastRequestedDial||vendorCallEnded)return;
+ queuedHangup={requestId:lastRequestedDial.id,phone:lastRequestedDial.phone,source:'vendor-opener'};
+ processQueuedHangup();
+});
 window.addEventListener('message',e=>{
  if(e.origin!==location.origin||e.source!==$('phoneFrame')?.contentWindow)return;
  const m=e.data;if(m?.source!=='central-phone')return;
@@ -115,26 +123,48 @@ window.addEventListener('message',e=>{
  if(m.type==='error'){sdkReady=false;notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');status('O telefone não carregou. Abra o APP Directcall e verifique a configuração.','error');show();}
  if(m.type==='dial-ack'||m.type==='probe-ack'){const pending=pendingPhoneCalls.get(m.requestId);if(!pending)return;clearTimeout(pending.timeout);pendingPhoneCalls.delete(m.requestId);m.ok?pending.resolve(m.message):pending.reject(Error(m.message||'O aplicativo não respondeu'));}
  if(m.type==='call-ended'){
-  const c=active();
-  if(!c||!lastRequestedDial||m.requestId!==lastRequestedDial.id||m.phone!==c.phone||lastRequestedDial.phone!==c.phone)return;
-  if(!['Comando enviado','Resultado desconhecido'].includes(c.status)||vendorCallEnded)return;
-  vendorCallEnded=true;
-  $('easyEnded').checked=true;$('ended').checked=true;
-  status('✓ A Directcall informou que a chamada com '+c.name+' terminou. Escolha o resultado para SALVAR E LIGAR PARA O PRÓXIMO.','good');
-  show();
-  if(document.body.classList.contains('easy-mode'))$('easyResultSection').scrollIntoView({behavior:'smooth',block:'nearest'});
-  if($('easyAutoNext').checked&&!sequencePaused&&!busy&&sdkReady&&view?.campaigns.find(x=>x.id===c.campaignId)?.isTest){
-   action(async()=>{
-    const current=active();
-    if(!current||current.id!==c.id||!vendorCallEnded||!lastRequestedDial||lastRequestedDial.contactId!==c.id)return;
-    $('result').value='A classificar';$('ended').checked=true;
-    status('✓ Chamada encerrada. Salvando o resultado como A CLASSIFICAR e avançando para a próxima pessoa autorizada...','good');
-    await finishCurrent(true);
-    status('Avanço automático processado. Se restar contato, a próxima chamada foi solicitada. Classifique os resultados pendentes quando terminar.','good');
-   });
+  if(!lastRequestedDial||m.requestId!==lastRequestedDial.id||m.phone!==lastRequestedDial.phone)return;
+  if(!vendorCallEnded){
+   queuedHangup=m;
+   processQueuedHangup();
   }
  }
 });
+// A chamada pode terminar enquanto a solicitação ao provedor ainda está em processamento.
+// Guarde o evento e reconcilie o estado servidor antes de avançar. Nunca use tempo fixo para discar.
+async function processQueuedHangup(){
+ if(busy||autoHangupProcessing||!queuedHangup)return;
+ autoHangupProcessing=true;
+ const event=queuedHangup;queuedHangup=null;
+ try{
+  await refresh();
+  const c=active();
+  if(!c||!lastRequestedDial||lastRequestedDial.id!==event.requestId||lastRequestedDial.contactId!==c.id||c.phone!==event.phone)return;
+  if(!['Comando enviado','Resultado desconhecido'].includes(c.status)||vendorCallEnded)return;
+  vendorCallEnded=true;
+  $('easyEnded').checked=true;$('ended').checked=true;
+  const camp=view.campaigns.find(x=>x.id===c.campaignId);
+  if(autoCampaignId===c.campaignId&&camp?.isTest&&!camp.paused&&!sequencePaused&&sdkReady){
+   status('✓ Chamada com '+c.name+' encerrada. Registrando e iniciando o próximo número automaticamente...','good');
+   $('result').value='A classificar';
+   // Executamos na mesma transação de interface; o servidor libera o contato
+   // atual ANTES de reservar o seguinte. Uma confirmação nunca inicia duas chamadas.
+   await finishCurrent(true);
+   await refresh();
+   status('Modo automático: aguardando o encerramento da próxima chamada; resultados ficam para classificar.','good');
+  }else{
+   status('✓ A Directcall confirmou o fim da ligação com '+c.name+'. Toque no resultado para continuar ou inicie o modo automático.','good');
+   show();
+   if(document.body.classList.contains('easy-mode'))$('easyResultSection').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+ }catch(e){
+  autoCampaignId=null;
+  status('Automação pausada para evitar ligações repetidas: '+err(e),'error');
+ }finally{
+  autoHangupProcessing=false;
+  if(queuedHangup&&!busy)Promise.resolve().then(processQueuedHangup);
+ }
+}
 async function sdk(force=false){
  const frame=$('phoneFrame');
  if(!frame)throw Error('Painel de telefone não encontrado');

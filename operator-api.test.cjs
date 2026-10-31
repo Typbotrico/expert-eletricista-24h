@@ -363,6 +363,6 @@ test('Directcall inner app only automatically places call for position zero; pro
  assert.doesNotMatch(src,/app\(\)\.comando\('1\|chamar/);
  const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
  assert.match(ui,/if\(m\.type==='dial-ack'\|\|m\.type==='probe-ack'\)/);
- assert.match(ui,/function checkPhoneWithoutCall\(\)/);
+ assert.match(ui,/async function checkPhoneWithoutCall\(\)/);
  assert.match(ui,/type:'probe',requestId/);
 });

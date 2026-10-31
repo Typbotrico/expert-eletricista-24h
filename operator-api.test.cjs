@@ -478,7 +478,7 @@ test('outgoing hangup needs explicit Chrome detector and resume does not claim s
  const tel=fs.readFileSync(path.join(__dirname,'telefone.html'),'utf8');
  assert.match(ui,/hangupBridgeReady=false/);
  assert.match(ui,/if\(m\.type==='hangup-bridge-ready'\)/);
- assert.match(ui,/hangupBridgeReady=true/);
+ assert.match(ui,/hangupBridgeReady=Number\.isFinite\(minor\)&&minor>=5/);
  assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady\)/);
  assert.match(ui,/const advance=await request\('resume-verified'/);
  assert.match(ui,/if\(!advance\.next\)/);
@@ -547,4 +547,28 @@ test('operator resume screen uses atomic endpoint, not disjoint finish-and-claim
  assert.match(html,/id="easyResumeFeedback"/);
  assert.match(js,/if\(view\.active\?\.campaignId&&ids\.has\(view\.active\.campaignId\)\)/);
  new vm.Script(js,{filename:'operador.js'});
+});
+
+test('v05 detector is armed for same call before no-click automatic continuation',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ const tel=fs.readFileSync(path.join(__dirname,'telefone.html'),'utf8');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ assert.match(ui,/hangupBridgeVersion=m\.version/);
+ assert.match(ui,/hangupBridgeReady=Number\.isFinite\(minor\)&&minor>=5/);
+ assert.match(ui,/if\(m\.type==='hangup-bridge-state'\)/);
+ assert.match(ui,/hangupCallState=m\.state/);
+ assert.match(ui,/hangupCallState==='call-started'/);
+ assert.match(ui,/autoCampaignId===campaignId&&chosen\?\.isTest===true&&!sequencePaused&&hangupBridgeReady/);
+ assert.match(ui,/easyStuckActions'\)\.classList\.toggle\('hidden',!stuck\|\|autoRunning/);
+ assert.match(ui,/easyResumeAuto'\)\.classList\.toggle\('hidden',!oldPending\|\|vendorCallEnded\|\|autoRunning/);
+ assert.match(ui,/easyResultSection'\)\.classList\.toggle\('hidden',!canFinish\|\|autoRunning/);
+ assert.match(ui,/await finishCurrent\(true\)/);
+ assert.match(html,/id="easyCancelAuto"/);
+ assert.match(tel,/inform\('hangup-bridge-state'/);
+ assert.match(tel,/message\.source==='central-autofila-extension'&&message\.type==='ended'/);
+ assert.match(tel,/message\.requestId===latestCallRequest\.id&&message\.phone===latestCallRequest\.phone/);
+ const inner=tel.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+ assert.ok(inner);new vm.Script(inner,{filename:'telefone-inline.js'});
+ new vm.Script(ui,{filename:'operador.js'});
 });

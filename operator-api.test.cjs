@@ -391,3 +391,47 @@ test('one-tap result buttons save and start next only after confirmed provider h
  assert.doesNotMatch(vendor,/message\.state===true.*inform\('call-ended'/);
  new vm.Script(ui,{filename:'operador.js'});
 });
+
+test('automatic test queue advances only after explicit opt-in and provider-end confirmation; outcomes can be reviewed',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const created=await h.call('/api/operator/test-list','POST',{name:'Dois testes',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907',consent:true},cookie);
+ assert.equal(created.status,201);
+ const campaignId=created.body.campaign.id;
+ await h.call('/api/operator/pause','POST',{campaignId,paused:false},cookie);
+ const claimed=await h.call('/api/operator/claim','POST',{campaignId},cookie);
+ const id=claimed.body.contact.id;
+ await h.call('/api/operator/dial','POST',{contactId:id},cookie,'auto-queue-rico-dial-123456');
+ const rejected=await h.call('/api/operator/finish','POST',{contactId:id,result:'A classificar',ended:true},cookie);
+ assert.equal(rejected.status,422);
+ const done=await h.call('/api/operator/finish','POST',{contactId:id,result:'A classificar',ended:true,providerHangupVerified:true},cookie);
+ assert.equal(done.status,200);
+ assert.equal(done.body.contact.result,'A classificar');
+ assert.equal(done.body.contact.owner,null);
+ const next=await h.call('/api/operator/claim','POST',{campaignId},cookie);
+ assert.equal(next.status,200);
+ assert.equal(next.body.contact.name,'Igor');
+ assert.equal(next.body.contact.attempts,0);
+ const review=await h.call('/api/operator/reclassify','POST',{contactId:id,result:'Não ligar'},cookie);
+ assert.equal(review.status,200);
+ assert.equal(review.body.contact.result,'Não ligar');
+ const state=await h.call('/api/operator/view','GET',null,cookie);
+ assert.equal(state.body.contacts.find(x=>x.name==='Rico').attempts,1);
+ assert.equal(state.body.contacts.find(x=>x.name==='Igor').status,'Reservado');
+ assert.equal(state.body.blocked,1);
+ await assert.rejects(()=>h.call('/api/operator/reclassify','POST',{contactId:id,result:'Atendeu'},cookie),/contato_nao_aguarda_classificacao/);
+});
+test('autonext frontend requires operator opt-in, test campaign, correlated vendor hangup and has fallback',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ assert.match(html,/id="easyAutoNext"/);
+ assert.match(html,/id="reviewItems"/);
+ assert.match(ui,/if\(\$\('easyAutoNext'\)\.checked&&!sequencePaused&&!busy&&sdkReady&&view\?\.campaigns\.find/);
+ assert.match(ui,/lastRequestedDial\.contactId!==c\.id/);
+ assert.match(ui,/providerHangupVerified:callResult==='A classificar'&&vendorCallEnded/);
+ assert.match(ui,/window\.confirm\('AUTORIZAR avanço automático/);
+ assert.match(ui,/await request\('reclassify'/);
+ new vm.Script(ui,{filename:'operador.js'});
+});

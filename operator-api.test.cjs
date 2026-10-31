@@ -266,9 +266,16 @@ test('safe retry for unconfirmed test dial is explicit and cannot cause unlimite
  assert.equal(resent.status,200);
  assert.equal(resent.body.contact.attempts,2);
  h.advance(15001);
+ const thirdChance=await h.call('/api/operator/retry-test','POST',{contactId:id,checkedNoActiveCall:true},cookie);
+ assert.equal(thirdChance.status,200);
+ assert.equal(thirdChance.body.contact.status,'Reservado');
+ const third=await h.call('/api/operator/dial','POST',{contactId:id},cookie,'third-dial-test-123456');
+ assert.equal(third.status,200);
+ assert.equal(third.body.contact.attempts,3);
+ h.advance(15001);
  await assert.rejects(()=>h.call('/api/operator/retry-test','POST',{contactId:id,checkedNoActiveCall:true},cookie),/repeticao_nao_autorizada/);
  const state=await h.call('/api/operator/view','GET',null,cookie);
- assert.equal(state.body.contacts[0].attempts,2);
+ assert.equal(state.body.contacts[0].attempts,3);
 });
 
 test('operator may safely close a no-ring attempt and proceed to next without auto dial',async()=>{

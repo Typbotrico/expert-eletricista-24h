@@ -38,7 +38,18 @@ function easyRender(){
  $('easyProgress').textContent=done+' de '+list.length+' concluídos';
  $('easyPause').textContent=sequencePaused?'▶ Continuar ligações':'⏸ Pausar ligações';
  $('easyStart').textContent=c&&c.status==='Reservado'?'☎ LIGAR PARA ESTE CONTATO':'▶ COMEÇAR A LIGAR';
- $('easyStart').disabled=busy||sequencePaused||!chosen||!sdkReady||(!chosen.isTest&&!insideCallHours())||(!!c&&c.status!=='Reservado')||(!c&&pending===0);
+  $('easyStart').disabled=busy||sequencePaused||!chosen||!sdkReady||(!chosen.isTest&&!insideCallHours())||(!!c&&c.status!=='Reservado')||(!c&&pending===0);
+ const diagnosis=!chosen?'Não existe lista selecionada. Escolha a lista autorizada no passo 1.':
+ !list.length?'A lista escolhida está vazia. Escolha outra campanha ou importe os contatos autorizados.':
+ c&&['Comando enviado','Resultado desconhecido'].includes(c.status)?'BLOQUEIO: '+c.name+' já possui uma tentativa registrada ('+c.status+'). A Central não pode ligar novamente ou avançar sem confirmar que a chamada terminou. Confira a Directcall e use RETOMAR LISTA (já desliguei), não o botão marrom de repetir.':
+ c?.status==='Reservado'?'CONTATO RESERVADO: '+c.name+'. Nenhuma nova chamada deste contato foi registrada. Clique em LIGAR PARA ESTE CONTATO, depois verifique o telefone da Directcall.':
+ !sdkReady?'TELEFONE NÃO PRONTO: o aplicativo Directcall ainda não carregou na Central. Abra o telefone no passo 2 e confira o login e a opção Via navegador.':
+ sequencePaused?'FILA PAUSADA: clique em Continuar ligações antes de iniciar.':
+ !chosen.isTest&&!insideCallHours()?'FORA DO HORÁRIO: essa campanha é comercial e a discagem está bloqueada. Use uma lista de teste autorizada.':
+ !upcoming?'SEM PRÓXIMO CONTATO: todos os registros da lista selecionada estão concluídos ou indisponíveis.':
+ chosen.paused?'LISTA PAUSADA: pressione COMEÇAR A LIGAR para ativar esta lista e solicitar a primeira ligação para '+upcoming.name+'.':
+ 'PRONTO PARA SOLICITAR: próximo contato '+upcoming.name+'. '+(hangupBridgeReady?'Detector de encerramento conectado.':'Detector automático NÃO conectado: a primeira discagem pode funcionar, mas a fila não continuará sozinha.');
+ $('easyDialDiagnosis').textContent='SITUAÇÃO DA DISCAGEM: '+diagnosis;
  const canFinish=c&&['Comando enviado','Resultado desconhecido','Reservado'].includes(c.status);
  $('easyResultSection').classList.toggle('hidden',!canFinish);
  $('easySaveNext').disabled=busy||sequencePaused||!sdkReady||!canFinish||!$('easyEnded').checked||!$('easyResult').value||($('easyResult').value==='Retornar'&&!$('easyCallbackAt').value);

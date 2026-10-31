@@ -132,6 +132,10 @@ const pendingPhoneCalls=new Map();
 window.addEventListener('message',e=>{
  if(e.origin!=='https://www.directcallsoft.com'&&e.origin!=='https://directcallsoft.com')return;
  if(!e.data||e.data.data!=='Chamada encerrada!'||!lastRequestedDial||vendorCallEnded)return;
+ // Aceitar o aviso nativo so quando o detector confirmou o INICIO
+ // desta tentativa e ela foi solicitada recentemente.
+ const age=Date.now()-lastRequestedDial.at;
+ if(!Number.isFinite(age)||age<0||age>30*60*1000||hangupCallState!=='call-started')return;
  queuedHangup={requestId:lastRequestedDial.id,phone:lastRequestedDial.phone,source:'vendor-opener'};
  processQueuedHangup();
 });
@@ -175,8 +179,12 @@ async function processQueuedHangup(){
   const c=active();
   if(!c||!lastRequestedDial||lastRequestedDial.id!==event.requestId||lastRequestedDial.contactId!==c.id||c.phone!==event.phone)return;
   if(!['Comando enviado','Resultado desconhecido'].includes(c.status)||vendorCallEnded)return;
-  // Sem evento correlacionado ao inicio efetivo da chamada, nao avancar automaticamente.
-  if(autoCampaignId===c.campaignId&&(event.source!=='directcall-hangup'||hangupCallState!=='call-started')){
+  // O aplicativo Directcall informa o encerramento tanto pelo detector
+  // correlacionado quanto pela propria janela oficial da operadora.
+  // Em ambos os casos o detector v0.5 deve ter confirmado o INICIO.
+  const verifiedExtensionEnd=event.source==='directcall-hangup';
+  const verifiedVendorEnd=event.source==='vendor-opener'&&Number.isFinite(lastRequestedDial.at)&&Date.now()-lastRequestedDial.at>=0&&Date.now()-lastRequestedDial.at<30*60*1000;
+  if(autoCampaignId===c.campaignId&&((!verifiedExtensionEnd&&!verifiedVendorEnd)||hangupCallState!=='call-started')){
    status('Aguardando confirmacao confiavel do encerramento pelo detector Directcall. Nenhuma nova ligacao sera iniciada.','warn');
    return;
   }

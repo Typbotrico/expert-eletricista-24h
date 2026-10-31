@@ -11,6 +11,8 @@ function show(){if(!view)return;const campaigns=view.campaigns||[],chosen=campai
 $('userLabel').textContent=view.user.name+' · '+(view.user.role==='admin'?'Administrador':'Operador');
 $('campaign').replaceChildren(new Option('Selecione a campanha',''),...campaigns.map(c=>new Option(c.name,c.id)));$('campaign').value=chosen?campaignId:'';
 $('admin').style.display=view.user.role==='admin'?'block':'none';
+$('quickUpload').style.display=view.user.role==='admin'?'block':'none';
+$('gotoImport').style.display=view.user.role==='admin'?'inline-flex':'none';
 $('agents').textContent=(view.users||[]).map(x=>x.name+' ('+x.username+')').join(' · ');
 const list=view.contacts.filter(c=>c.campaignId===campaignId);
 $('total').textContent=list.length;$('pending').textContent=list.filter(c=>c.status==='Pendente').length;$('finished').textContent=list.filter(c=>!['Pendente','Reservado','Comando enviado','Resultado desconhecido'].includes(c.status)).length;$('blocked').textContent=view.blocked;
@@ -29,39 +31,55 @@ const t=$('rows');t.replaceChildren();for(const x of list.slice(0,1000)){const t
 async function refresh(){view=await request('view');profile=view.user;const ids=new Set(view.campaigns.map(x=>x.id));if(!ids.has(campaignId)){campaignId=ids.has(localStorage.getItem(KEY))?localStorage.getItem(KEY):view.campaigns[0]?.id||''}$('auth').classList.add('hidden');$('dashboard').classList.add('ready');$('logout').classList.remove('hidden');show()}
 async function action(fn){if(busy)return;busy=true;show();try{await fn();await refresh()}catch(e){status('Erro: '+err(e),'error');console.warn('Central: operação não concluída')}finally{busy=false;show()}}
 async function script(src){return new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(Error('Não foi possível carregar a biblioteca '+src));document.head.append(s)})}
-function dockPhone(){
- const dock=$('directcallDock'),frame=document.getElementById('directcall-frame-web');
- if(!dock||!frame)return false;
- if(frame.parentNode!==dock)dock.appendChild(frame);
- const placeholder=$('phonePlaceholder');if(placeholder)placeholder.style.display='none';
- frame.style.setProperty('position','relative','important');frame.style.setProperty('bottom','auto','important');frame.style.setProperty('right','auto','important');
- frame.style.setProperty('width','350px','important');frame.style.setProperty('height','550px','important');
- const phone=document.getElementById('directcall-app-web');if(phone){phone.setAttribute('allow','microphone; autoplay');phone.setAttribute('title','Telefone oficial Directcall');phone.style.setProperty('width','100%','important');phone.style.setProperty('height','505px','important')}
- return true;
+const pendingPhoneCalls=new Map();
+window.addEventListener('message',e=>{
+ if(e.origin!==location.origin||e.source!==$('phoneFrame')?.contentWindow)return;
+ const m=e.data;if(m?.source!=='central-phone')return;
+ if(m.type==='ready'){sdkReady=true;notice('sdkStatus','Telefone Directcall carregado no painel, sem sobrepor a Central. Confira Via navegador e o headset.','good');show();}
+ if(m.type==='error'){notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');}
+ if(m.type==='dial-ack'){const pending=pendingPhoneCalls.get(m.requestId);if(!pending)return;clearTimeout(pending.timeout);pendingPhoneCalls.delete(m.requestId);m.ok?pending.resolve():pending.reject(Error(m.message||'Comando não confirmado'));}
+});
+async function sdk(){
+ const frame=$('phoneFrame');
+ if(!frame)throw Error('Painel de telefone não encontrado');
+ if(active()&&['Comando enviado','Resultado desconhecido'].includes(active().status)){
+   notice('sdkStatus','Finalize a chamada em andamento antes de recarregar o telefone.','warn');return;
+ }
+ sdkReady=false;notice('sdkStatus','Abrindo telefone isolado dentro do cartão...');
+ frame.src='/telefone?ts='+Date.now();
+ show();
 }
-async function sdk(){if(sdkLoading)return;sdkLoading=true;sdkReady=false;notice('sdkStatus','Conferindo aplicativo oficial Directcall...');try{
-if(!window.jQuery)await script('https://code.jquery.com/jquery-3.7.1.min.js');
-if(typeof window.jQuery?.directcall_app!=='function')await script('https://www.directcallsoft.com/api/app/novo/app/directcall-app-web.js');
-if(typeof window.jQuery?.directcall_app!=='function')throw Error('Biblioteca carregada, mas comando não disponível.');
-if(!window.__operatorDirectcallInitialized){window.jQuery.directcall_app({state:'hide',clicktocall:false,habilitar_menu_chamadas:true,habilitar_menu_sms:false,habilitar_menu_mensagem_de_voz:false});window.__operatorDirectcallInitialized=true}
-if(typeof window.jQuery.directcall_app()?.comando!=='function')throw Error('O plugin não disponibilizou o método de ligação.');
-sdkReady=true;try{window.jQuery.directcall_app().state(350,550);dockPhone();setTimeout(dockPhone,300)}catch(e){console.warn('Directcall: não foi possível ampliar automaticamente. Use Mostrar telefone.',e)}notice('sdkStatus',dockPhone()?'Telefone oficial fixado dentro da Central. Confirme Via navegador no Directcall APP.':'Plugin carregado. Clique em Mostrar telefone para montar o aparelho nesta tela.','good');
-}catch(e){notice('sdkStatus',err(e)+'. Nenhuma chamada será enviada.','error')}
-finally{sdkLoading=false;show()}}
-function expandPhone(){if(!sdkReady)throw Error('Plugin ainda não carregado');const app=window.jQuery.directcall_app();if(!app||typeof app.state!=='function')throw Error('Controle da janela indisponível. Use Reconectar interface.');app.state(350,550);if(!dockPhone())throw Error('O painel oficial ainda não foi criado. Clique em Reconectar interface.');setTimeout(dockPhone,250)}
-function sendProvider(c){if(!sdkReady)throw Error('Plugin da Directcall indisponível');expandPhone();const provider=window.jQuery.directcall_app();const name=c.name.replace(/[|\r\n]/g,' ').slice(0,70),id=c.id.replace(/[^a-zA-Z0-9_-]/g,'');if(typeof provider?.comando!=='function')throw Error('Comando Directcall ausente');provider.comando('1|chamar|'+c.phone+'|'+id+'|'+name)}
+function expandPhone(){
+ if(!sdkReady)throw Error('O telefone ainda está inicializando. Use Reconectar interface caso não apareça.');
+ const frame=$('phoneFrame');
+ if(!frame?.contentWindow)throw Error('Painel Directcall não disponível');
+ frame.contentWindow.postMessage({source:'central-operator',type:'expand'},location.origin);
+}
+function sendProvider(c){
+ if(!sdkReady)throw Error('Plugin Directcall ainda não carregou dentro do painel');
+ const frame=$('phoneFrame');if(!frame?.contentWindow)throw Error('Painel de telefone desconectado');
+ const requestId=crypto.randomUUID();
+ return new Promise((resolve,reject)=>{
+  const timeout=setTimeout(()=>{pendingPhoneCalls.delete(requestId);reject(Error('O painel não confirmou o envio do comando. Confira o APP antes de qualquer nova tentativa.'))},5000);
+  pendingPhoneCalls.set(requestId,{resolve,reject,timeout});
+  frame.contentWindow.postMessage({source:'central-operator',type:'dial',requestId,id:c.id,name:c.name,phone:c.phone},location.origin);
+ });
+}
 async function boot(){try{const state=await request('status');if(!state.configured){setupUI(false);return}try{await refresh();await sdk();}catch{setupUI(true)}}catch(e){setupUI(true);notice('authMessage','Não foi possível conectar ao banco da Central: '+err(e),'error')}}
 $('setupForm').onsubmit=async e=>{e.preventDefault();try{const r=await request('setup',{method:'POST',data:{key:$('setupKey').value,name:$('setupName').value,password:$('setupPass').value}});$('setupPass').value='';await refresh();await sdk();}catch(ex){notice('authMessage',err(ex),'error')}};
 $('loginForm').onsubmit=async e=>{e.preventDefault();const b=$('loginButton');b.disabled=true;try{await request('login',{method:'POST',data:{username:$('username').value.trim(),password:$('password').value}});$('password').value='';await refresh();await sdk()}catch(ex){const m=err(ex);notice('authMessage',m.includes('muitas tentativas')?'Limite de segurança: aguarde 60 segundos antes de tentar novamente. Se não lembrar a senha, clique em Recuperar senha.':m,'error')}finally{b.disabled=false}};
 $('showRecover').onclick=()=>{$('loginForm').classList.add('hidden');$('recoveryForm').classList.remove('hidden');notice('authMessage','Abra seu link individual de recuperação para preencher o código seguro.');};
 $('cancelRecovery').onclick=()=>{$('recoveryForm').classList.add('hidden');$('loginForm').classList.remove('hidden');$('recoveryPassword').value='';$('recoveryConfirm').value='';notice('authMessage','Entre com usuário admin e sua senha atual.');};
 $('recoveryForm').onsubmit=async e=>{e.preventDefault();if($('recoveryPassword').value!==$('recoveryConfirm').value){notice('authMessage','As duas senhas estão diferentes.','error');return;}const b=$('submitRecovery');b.disabled=true;try{await request('reset-password',{method:'POST',data:{code:$('recoveryCode').value.trim(),password:$('recoveryPassword').value}});$('recoveryCode').value='';$('recoveryPassword').value='';$('recoveryConfirm').value='';$('recoveryForm').classList.add('hidden');$('loginForm').classList.remove('hidden');$('username').value='admin';$('password').focus();notice('authMessage','Senha redefinida. Entre com usuário admin e a nova senha. Nenhum contato foi perdido.','good')}catch(ex){notice('authMessage','Recuperação não concluída: '+err(ex),'error')}finally{b.disabled=false}};
-$('logout').onclick=async()=>{await request('logout',{method:'POST',data:{}});profile=null;view=null;sdkReady=false;$('logout').classList.add('hidden');setupUI(true)};
+$('logout').onclick=async()=>{await request('logout',{method:'POST',data:{}});profile=null;view=null;sdkReady=false;$('phoneFrame').removeAttribute('src');$('logout').classList.add('hidden');setupUI(true)};
 $('campaign').onchange=e=>{campaignId=e.target.value;localStorage.setItem(KEY,campaignId);show()};
 $('refresh').onclick=()=>action(async()=>{status('Atualizando lista...')});
 $('checkSdk').onclick=()=>sdk();
+$('gotoImport').onclick=()=>document.getElementById('quickUpload').scrollIntoView({behavior:'smooth',block:'start'});
+$('gotoPhone').onclick=()=>document.getElementById('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});
+$('gotoQueue').onclick=()=>document.getElementById('queueCard').scrollIntoView({behavior:'smooth',block:'start'});
 $('testMic').onclick=async()=>{const b=$('testMic'),out=$('micState');b.disabled=true;let stream,ctx;try{if(!navigator.mediaDevices?.getUserMedia)throw Error('Navegador sem permissão de microfone');stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});const AudioCtor=window.AudioContext||window.webkitAudioContext;if(!AudioCtor)throw Error('AudioContext indisponível');ctx=new AudioCtor();const source=ctx.createMediaStreamSource(stream),analyser=ctx.createAnalyser();source.connect(analyser);analyser.fftSize=1024;const values=new Uint8Array(analyser.fftSize);let peak=0;out.textContent='Microfone autorizado. Fale por 2 segundos para verificar o sinal...';for(let i=0;i<8;i++){await new Promise(resolve=>setTimeout(resolve,250));analyser.getByteTimeDomainData(values);let sum=0;for(const v of values){const n=(v-128)/128;sum+=n*n}peak=Math.max(peak,Math.sqrt(sum/values.length))}out.textContent=peak>0.006?'✓ Microfone captando sua voz. Abra o Directcall APP e confirme Via navegador.':'Microfone autorizado, mas a voz não foi detectada. Confira a entrada selecionada no Windows.'}catch(e){out.textContent='Não foi possível testar: '+(e?.name==='NotAllowedError'?'permita o microfone nas configurações do Chrome.':err(e))}finally{stream?.getTracks().forEach(t=>t.stop());try{await ctx?.close()}catch{}b.disabled=false}};
-$('openPhone').onclick=async()=>{try{if(!sdkReady)await sdk();expandPhone();notice('sdkStatus','Telefone exibido dentro da Central. Entre no Directcall APP e confirme Via navegador antes da chamada.','good')}catch(e){notice('sdkStatus','Não foi possível mostrar o telefone integrado: '+err(e)+'. Tente Reconectar interface.','warn')}};
+$('openPhone').onclick=async()=>{try{if(!sdkReady){await sdk();return}expandPhone();document.getElementById('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});notice('sdkStatus','Telefone está dentro do painel. Confirme Via navegador no APP.','good')}catch(e){notice('sdkStatus','Não foi possível mostrar: '+err(e)+'. Clique em Reconectar interface.','warn')}};
 $('next').onclick=()=>action(async()=>{const r=await request('claim',{method:'POST',data:{campaignId}});status('Contato reservado: '+r.contact.name+'. Confira a Directcall antes de ligar.','good')});
 $('skip').onclick=()=>action(async()=>{const c=active();if(!c)return;await request('skip',{method:'POST',data:{contactId:c.id}});status('Contato pulado. Selecione o próximo.')});
 async function requestOneDial(c){
@@ -70,7 +88,7 @@ async function requestOneDial(c){
  if(sequencePaused)throw Error('Fila pausada pelo operador');
  const key=crypto.randomUUID().replaceAll('-','');
  await request('dial',{method:'POST',data:{contactId:c.id},key});
- try{sendProvider(c)}
+ try{await sendProvider(c)}
  catch(e){try{await request('unknown',{method:'POST',data:{contactId:c.id}})}catch{}throw Error('Não foi possível confirmar o envio. O contato ficou bloqueado para evitar outra discagem. Confira no APP. '+err(e))}
  status('Ligação solicitada para '+c.name+' ('+c.phone+'). Aguarde no Directcall. Ao encerrar, marque o resultado e escolha Salvar e ligar próximo.','good');
 }

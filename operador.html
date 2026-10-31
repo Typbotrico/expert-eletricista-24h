@@ -131,6 +131,7 @@ body.easy-mode #dashboard>div.flex.between p{display:none}
 <div class="easy-step" id="easyStep3">
 <div class="easy-step-title"><span class="easy-circle">3</span><div><strong>Comece a ligar</strong><small>Uma pessoa por vez, na ordem da lista</small></div></div>
 <div class="easy-auto-check"><strong>✓ MODO AUTOMÁTICO</strong><p id="easyAutoStatus" class="small">Aguarde a confirmação DETECTOR CONECTADO. Depois, clique uma vez em COMEÇAR A LIGAR; as chamadas seguintes dependem do evento real de encerramento.</p><label class="checkbox"><input id="easyAutoNext" type="checkbox" checked> Ligar automaticamente para o próximo após o encerramento confirmado</label></div><p class="small muted">O resultado de cada ligação fica para classificar depois. Se não chegar um evento confiável de encerramento, a fila para para não sobrepor chamadas.</p>
+<p class="small muted" id="easySpeedStatus" aria-live="off">Tempo de troca medido depois do primeiro encerramento confirmado.</p>
 <div class="easy-current"><span id="easyCallLabel">Próxima ligação</span><strong id="easyContact">Escolha sua lista acima</strong><span id="easyPhoneNumber"></span></div><div id="easyActionHint" class="easy-status" role="status">Escolha uma lista e confirme o telefone para começar.</div>
 <div id="easyStuckActions" class="easy-stuck hidden">
 <p><strong>O telefone não tocou?</strong> Confira primeiro se nenhuma chamada está ativa no aparelho Directcall.</p>

@@ -9,7 +9,7 @@ function setupUI(configured){$('auth').classList.remove('hidden');$('dashboard')
 const active=()=>view?.active||null;
 
 function insideCallHours(){const now=new Date(),wd=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now),tm=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);return !['Sat','Sun'].includes(wd)&&tm>='09:00'&&tm<'18:00'}
-let lastRequestedDial=null,vendorCallEnded=false,autoCampaignId=null,queuedHangup=null,autoHangupProcessing=false,hangupBridgeReady=false,hangupBridgeVersion='',hangupCallState='waiting',autoOptedOut=false,autoSwitchInfo='';
+let lastRequestedDial=null,vendorCallEnded=false,autoCampaignId=null,queuedHangup=null,autoHangupProcessing=false,hangupBridgeReady=false,hangupBridgeVersion='',hangupCallState='waiting',autoOptedOut=false,autoSwitchInfo='',callProofMessage='Aguardando início. O aplicativo pode aceitar um comando sem iniciar a chamada.',dialProofTimer=null;
 function easyRender(){
  if(!view)return;
  const admin=view.user.role==='admin',all=view.campaigns||[],chosen=all.find(c=>c.id===campaignId);
@@ -28,6 +28,7 @@ function easyRender(){
  $('easyPhoneStatus').textContent=sdkReady?'✓ Plugin carregado, mas o login na Directcall ainda precisa ser conferido. Verifique “Via navegador” e a linha de origem no aparelho.':'Telefone carregando... Se não abrir, clique em “Mostrar telefone ao lado”.';
  $('easyPhoneStatus').classList.toggle('ok',sdkReady);
  $('easySpeedStatus').textContent=autoSwitchInfo||'Tempo de avanço: será medido após a primeira ligação automática. A caixa postal continua ativa até a Directcall confirmar o fim da chamada.';
+ $('easyCallProof').textContent=callProofMessage;
  const upcoming=list.find(x=>x.status==='Pendente')||list.find(x=>x.status==='Retornar'&&x.callbackAt&&Date.parse(x.callbackAt)<=Date.now());
  $('easyContact').textContent=c?c.name:chosen?(upcoming?upcoming.name:'Nenhum contato pendente nesta lista'):'Escolha uma lista acima';
  $('easyCallLabel').textContent=c?(c.status==='Reservado'?'Contato reservado':c.status==='Resultado desconhecido'?'Revisar chamada antes de avançar':'Ligação atual'):'Próxima ligação';
@@ -161,7 +162,9 @@ window.addEventListener('message',e=>{
   if(m.version)hangupBridgeVersion=m.version;
   if(m.state==='call-started'){
    if(!lastRequestedDial.startedAt)lastRequestedDial.startedAt=performance.now();
-   status('✓ Directcall sinalizou ligação em andamento para '+(active()?.name||'contato')+'. Modo automático aguardando desligamento.','good');
+   if(dialProofTimer){clearTimeout(dialProofTimer);dialProofTimer=null;}
+   callProofMessage='O visor Directcall passou a mostrar chamada em andamento para '+(active()?.name||'contato')+'. Isso ainda não confirma que o celular tocou.';
+   status('O APP Directcall sinalizou tentativa em andamento para '+(active()?.name||'contato')+'. O toque no destino ainda não foi confirmado.','good');
   }
   show();
  }
@@ -279,6 +282,8 @@ function sendProvider(c){
  if(!sdkReady)throw Error('Plugin Directcall ainda não carregou dentro do painel');
  const frame=$('phoneFrame');if(!frame?.contentWindow)throw Error('Painel de telefone desconectado');
  const requestId=crypto.randomUUID();
+ if(dialProofTimer){clearTimeout(dialProofTimer);dialProofTimer=null;}
+ callProofMessage='Enviando comando para '+c.name+'. Ainda não é confirmação de telefonia.';
  vendorCallEnded=false;hangupCallState='waiting';lastRequestedDial={id:requestId,phone:c.phone,contactId:c.id,at:Date.now()};
  return new Promise((resolve,reject)=>{
   const timeout=setTimeout(()=>{pendingPhoneCalls.delete(requestId);reject(Error('O painel não confirmou o envio do comando. Confira o APP antes de qualquer nova tentativa.'))},5000);
@@ -478,7 +483,21 @@ async function requestOneDial(c){
  status('Enviando '+c.phone+' ao telefone Directcall. Aguardando resposta técnica do plugin...');
  try{await sendProvider(c)}
  catch(e){try{await request('unknown',{method:'POST',data:{contactId:c.id}})}catch{}throw Error('Não foi possível confirmar o envio. O contato ficou bloqueado para evitar outra discagem. Confira no APP. '+err(e))}
- status('Ligação solicitada para '+c.name+' ('+c.phone+'). '+(autoCampaignId===c.campaignId&&hangupBridgeReady?'AUTOMÁTICO ATIVO: não clique nos resultados; aguardando o detector confirmar o desligamento.':'Sem sinal de desligamento automático: use os resultados apenas após encerrar a chamada.'),'good');
+ // A resposta {state:true} da Directcall significa apenas que api.cmd foi executada.
+ // Não marca telefonia como estabelecida sem observação posterior no APP.
+ if(hangupCallState!=='call-started'){
+  const requestId=lastRequestedDial?.id;
+  callProofMessage='Comando aceito pelo APP para '+c.name+'. Ainda sem confirmação de início da chamada ou toque no celular.';
+  dialProofTimer=setTimeout(()=>{
+   dialProofTimer=null;
+   if(lastRequestedDial?.id!==requestId||hangupCallState==='call-started'||vendorCallEnded)return;
+   callProofMessage='ATENÇÃO: o APP recebeu o comando, mas não sinalizou início da chamada após 10 segundos. Confira login, Via navegador, número de origem e saldo na Directcall. Não repita sem verificar o aparelho.';
+   status(callProofMessage,'warn');
+   show();
+  },10000);
+ }else callProofMessage='O APP mostrou chamada em andamento para '+c.name+'; o toque no celular ainda não foi confirmado.';
+ status('Comando entregue ao APP Directcall para '+c.name+'. O toque real no celular NÃO foi confirmado.','good');
+ show();
 }
 async function beginQueueDial(){
  if(sequencePaused)throw Error('A fila está pausada');

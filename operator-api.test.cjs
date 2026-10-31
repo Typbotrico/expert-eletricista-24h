@@ -481,7 +481,7 @@ test('outgoing hangup needs explicit Chrome detector and resume does not claim s
  assert.match(ui,/hangupBridgeReady=true/);
  assert.match(ui,/if\(autoCampaignId===c\.campaignId&&camp\?\.isTest&&!camp\.paused&&!sequencePaused&&sdkReady&&hangupBridgeReady\)/);
  assert.match(ui,/const advance=await request\('resume-verified'/);
- assert.match(ui,/if\(advance\?\.kind==='dial-sent'\)/);
+ assert.match(ui,/if\(!advance\.next\)/);
  assert.match(ui,/throw Error\('A ligação anterior foi salva, mas NÃO foi possível selecionar o próximo contato/);
  assert.match(tel,/source:'central-extension',type:'call-intent'/);
  assert.match(tel,/inform\('hangup-bridge-ready'/);

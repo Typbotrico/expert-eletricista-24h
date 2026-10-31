@@ -127,13 +127,14 @@ body.easy-mode #dashboard>div.flex.between p{display:none}
 </div>
 <div class="easy-step" id="easyStep3">
 <div class="easy-step-title"><span class="easy-circle">3</span><div><strong>Comece a ligar</strong><small>Uma pessoa por vez, na ordem da lista</small></div></div>
-<label class="checkbox easy-auto-check"><input id="easyAutoNext" type="checkbox"> <strong>Avanço automático:</strong> chamar o próximo contato da LISTA DE TESTE quando a Directcall confirmar o encerramento</label><p class="small muted">Opcional. Usa somente os números autorizados e deixa o resultado pendente para você classificar depois. Se a Directcall não enviar o aviso, use os botões de resultado abaixo.</p>
+<div class="easy-auto-check"><strong>✓ MODO AUTOMÁTICO</strong><p id="easyAutoStatus" class="small">Clique uma vez em COMEÇAR A LIGAR. Depois, a Central seguirá a lista de teste quando a Directcall confirmar cada encerramento.</p><label class="checkbox"><input id="easyAutoNext" type="checkbox" checked> Ligar automaticamente para o próximo após o encerramento confirmado</label></div><p class="small muted">O resultado de cada ligação fica para classificar depois. Se não chegar um evento confiável de encerramento, a fila para para não sobrepor chamadas.</p>
 <div class="easy-current"><span id="easyCallLabel">Próxima ligação</span><strong id="easyContact">Escolha sua lista acima</strong><span id="easyPhoneNumber"></span></div><div id="easyActionHint" class="easy-status" role="status">Escolha uma lista e confirme o telefone para começar.</div>
 <div id="easyStuckActions" class="easy-stuck hidden">
 <p><strong>O telefone não tocou?</strong> Confira primeiro se nenhuma chamada está ativa no aparelho Directcall.</p>
 <div class="actions"><button id="easyRetry" type="button" class="btn warn easy-wide">☎ Conferi — tentar ligar agora</button>
 <button id="easyNoRing" type="button" class="btn secondary easy-wide">✓ Não tocou — encerrar tentativa</button></div>
 <p class="small">O primeiro botão tenta ligar novamente para este mesmo contato, depois da sua confirmação. O segundo encerra a tentativa sem fazer nenhuma chamada.</p></div>
+<button id="easyResumeAuto" type="button" class="btn green easy-wide easy-primary hidden">▶ RETOMAR LISTA AUTOMATICAMENTE (já desliguei)</button>
 <button id="easyStart" type="button" class="btn green easy-wide easy-primary">▶ COMEÇAR A LIGAR</button>
 <div class="easy-result" id="easyResultSection">
 <h3>Terminou a ligação? Escolha como foi:</h3>

@@ -487,6 +487,22 @@ test('automatic test queue advances only after explicit opt-in and provider-end 
  assert.equal(state.body.blocked,1);
  await assert.rejects(()=>h.call('/api/operator/reclassify','POST',{contactId:id,result:'Atendeu'},cookie),/contato_nao_aguarda_classificacao/);
 });
+test('Directcall command acknowledgement does not claim a real ringing phone, no automatic redial',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const ui=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const phone=fs.readFileSync(path.join(__dirname,'telefone.html'),'utf8');
+ assert.ok(html.includes('id="easyCallProof"'),'The operator must see actual proof status');
+ assert.ok(ui.includes('O toque real no celular NÃO foi confirmado'),'Command ACK is not PSTN success');
+ assert.ok(ui.includes("hangupCallState!=='call-started'"),'Separate APP start observation');
+ assert.ok(ui.includes('dialProofTimer=setTimeout('),'Warn if no APP start event');
+ assert.ok(ui.includes("lastRequestedDial?.id!==requestId"),'A stale timeout must not label the next call');
+ assert.ok(ui.includes('Não repita sem verificar o aparelho.'),'Never blind retry');
+ assert.ok(!ui.includes('await requestOneDial(c);\n  await requestOneDial(c);'));
+ assert.ok(phone.includes('APP recebeu e processou o comando; não confirma toque nem ligação atendida'));
+ new vm.Script(ui,{filename:'operador.js'});
+});
+
 test('atomic hangup reserves without dialling the next authorised test contact',async()=>{
  const h=harness();
  const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});

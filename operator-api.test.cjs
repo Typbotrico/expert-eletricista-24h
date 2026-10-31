@@ -41,6 +41,71 @@ test('shared campaigns prevent duplicate calls, preserve blocked numbers, and re
  assert.equal((await h.call('/api/operator/export','GET',null,cookie)).status,200);
 });
 
+test('admin can reset only a selected test list after confirmed hangup and retry the same numbers',async()=>{
+ const h=harness();
+ const created=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});
+ const cookie=created.headers['Set-Cookie'].split(';')[0];
+ const a=await h.call('/api/operator/test-list','POST',{name:'Teste a zerar',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907\nSamira;24981273160',consent:true},cookie);
+ const b=await h.call('/api/operator/test-list','POST',{name:'Outra lista preservada',text:'Nome;Telefone\nLucas;24999997777\nAna;24988886666',consent:true},cookie);
+ const commercial=await h.call('/api/operator/campaign','POST',{name:'Campanha comercial'},cookie);
+ const cid=a.body.campaign.id,otherId=b.body.campaign.id;
+ assert.equal((await h.call('/api/operator/test-reset','POST',{campaignId:cid,confirmed:true,checkedNoActiveCall:true})).status,401,'Reset requires authentication');
+ assert.equal((await h.call('/api/operator/test-reset','POST',{campaignId:cid,confirmed:true,checkedNoActiveCall:false},cookie)).status,422,'No active call must be confirmed');
+ assert.equal((await h.call('/api/operator/test-reset','POST',{campaignId:commercial.body.campaign.id,confirmed:true,checkedNoActiveCall:true},cookie)).status,403,'Commercial lists cannot be reset');
+ await h.call('/api/operator/pause','POST',{campaignId:cid,paused:false},cookie);
+ const first=(await h.call('/api/operator/claim','POST',{campaignId:cid},cookie)).body.contact;
+ await h.call('/api/operator/dial','POST',{contactId:first.id},cookie,'reset-test-call-12345678');
+ await h.call('/api/operator/finish','POST',{contactId:first.id,ended:true,result:'Atendeu'},cookie);
+ const second=(await h.call('/api/operator/claim','POST',{campaignId:cid},cookie)).body.contact;
+ await h.call('/api/operator/dial','POST',{contactId:second.id},cookie,'reset-test-call-87654321');
+ await assert.rejects(()=>h.call('/api/operator/test-reset','POST',{campaignId:cid,confirmed:true,checkedNoActiveCall:true},cookie),/aguarde_30_segundos/);
+ h.advance(31000);
+ const reset=await h.call('/api/operator/test-reset','POST',{campaignId:cid,confirmed:true,checkedNoActiveCall:true},cookie);
+ assert.equal(reset.status,200);
+ assert.equal(reset.body.reset,3);assert.equal(reset.body.blocked,0);assert.equal(reset.body.paused,true);
+ const state=h.state().operatorV1;
+ assert.equal(state.campaigns.find(c=>c.id===cid).paused,true);
+ assert.deepEqual(state.contacts.filter(c=>c.campaignId===cid).map(c=>[c.status,c.attempts,c.owner,c.lastKey]),[
+  ['Pendente',0,null,null],['Pendente',0,null,null],['Pendente',0,null,null]
+ ]);
+ assert.equal(state.contacts.filter(c=>c.campaignId===otherId).length,2,'The other test campaign must remain unchanged');
+ assert.ok(state.campaigns.some(c=>c.id===commercial.body.campaign.id),'Commercial campaign must be preserved');
+ assert.ok(state.events.some(e=>e.type==='lista_de_teste_reiniciada'),'Reset must remain auditable');
+ await h.call('/api/operator/pause','POST',{campaignId:cid,paused:false},cookie);
+ assert.equal((await h.call('/api/operator/claim','POST',{campaignId:cid},cookie)).body.contact.name,'Rico','The same authorized first number should be eligible again');
+ const repeated=await h.call('/api/operator/test-list','POST',{name:'Teste reimportado',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907',consent:true},cookie);
+ assert.equal(repeated.status,201,'A new authorised test campaign should accept the same numbers');
+});
+
+test('test reset does not clear global no-call blocks',async()=>{
+ const h=harness();
+ const created=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});
+ const cookie=created.headers['Set-Cookie'].split(';')[0];
+ const a=await h.call('/api/operator/test-list','POST',{name:'Teste com bloqueio',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907',consent:true},cookie);
+ const id=a.body.campaign.id;
+ await h.call('/api/operator/pause','POST',{campaignId:id,paused:false},cookie);
+ const c=(await h.call('/api/operator/claim','POST',{campaignId:id},cookie)).body.contact;
+ await h.call('/api/operator/dial','POST',{contactId:c.id},cookie,'reset-block-test-12345678');
+ await h.call('/api/operator/finish','POST',{contactId:c.id,ended:true,result:'Não ligar'},cookie);
+ const reset=await h.call('/api/operator/test-reset','POST',{campaignId:id,confirmed:true,checkedNoActiveCall:true},cookie);
+ assert.equal(reset.status,200);
+ assert.equal(reset.body.reset,1);assert.equal(reset.body.blocked,1);
+ const state=h.state().operatorV1;
+ assert.ok(state.blocked.includes(c.phone));
+ assert.equal(state.contacts.find(x=>x.id===c.id).status,'Não ligar');
+});
+
+test('reset control exists only for a selected test campaign and never triggers a phone call',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const js=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ assert.ok(html.includes('id="easyResetTest"'));
+ assert.ok(js.includes("request('test-reset',{method:'POST'"));
+ assert.ok(js.includes("!admin||!chosen?.isTest"));
+ assert.ok(js.includes("lastRequestedDial=null;hangupCallState='waiting'"));
+ new vm.Script(js,{filename:'operador.js'});
+});
+
 test('explicitly authorised own-number Directcall tests work after hours but remain paused by default',async()=>{
  const h=harness();
  const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});

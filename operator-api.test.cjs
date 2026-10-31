@@ -270,3 +270,32 @@ test('safe retry for unconfirmed test dial is explicit and cannot cause unlimite
  const state=await h.call('/api/operator/view','GET',null,cookie);
  assert.equal(state.body.contacts[0].attempts,2);
 });
+
+test('operator may safely close a no-ring attempt and proceed to next without auto dial',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const created=await h.call('/api/operator/test-list','POST',{name:'Primeira lista',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907',consent:true},cookie);
+ assert.equal(created.status,201);
+ const campaignId=created.body.campaign.id;
+ await h.call('/api/operator/pause','POST',{campaignId,paused:false},cookie);
+ const claimed=await h.call('/api/operator/claim','POST',{campaignId},cookie);
+ const id=claimed.body.contact.id;
+ assert.equal(claimed.body.contact.name,'Rico');
+ await h.call('/api/operator/dial','POST',{contactId:id},cookie,'no-ring-example-key-1234567');
+ const blocked=await h.call('/api/operator/no-ring','POST',{contactId:id,checkedNoActiveCall:false},cookie);
+ assert.equal(blocked.status,422);
+ await assert.rejects(()=>h.call('/api/operator/no-ring','POST',{contactId:id,checkedNoActiveCall:true},cookie),/aguarde_15_segundos_antes_de_revisar/);
+ h.advance(15001);
+ const closed=await h.call('/api/operator/no-ring','POST',{contactId:id,checkedNoActiveCall:true},cookie);
+ assert.equal(closed.status,200);
+ assert.equal(closed.body.contact.status,'Não chegou a ligar');
+ assert.equal(closed.body.contact.owner,null);
+ const next=await h.call('/api/operator/claim','POST',{campaignId},cookie);
+ assert.equal(next.status,200);
+ assert.equal(next.body.contact.name,'Igor');
+ assert.equal(next.body.contact.attempts,0);
+ const record=await h.call('/api/operator/view','GET',null,cookie);
+ assert.equal(record.body.contacts[0].result,'Não chegou a ligar');
+ assert.equal(record.body.contacts[0].attempts,1);
+});

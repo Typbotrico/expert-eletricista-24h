@@ -64,6 +64,7 @@ function easyRender(){
  $('easyAutoStatus').textContent=autoActive?(hangupBridgeReady?'AUTOMÁTICO ATIVO: detector de encerramento conectado. Aguardando fim da chamada.':'AUTOMÁTICO EM ESPERA: não foi detectado um monitor confiável de encerramento.'):(hangupBridgeReady?'✓ DETECTOR DE ENCERRAMENTO ATIVO: modo automático preparado.':'⚠ DETECTOR NÃO CONECTADO. A Directcall não informa o fim das chamadas de saída ao site; instale o detector Chrome para avançar sem cliques.');
  const oldPending=!!(c&&chosen?.isTest&&['Comando enviado','Resultado desconhecido'].includes(c.status));
  $('easyResumeAuto').classList.toggle('hidden',!oldPending||vendorCallEnded);
+ if(!oldPending&&$('easyResumeFeedback').classList.contains('hidden')===false&&$('easyResumeFeedback').classList.contains('error')===false){} // Preserve last operation feedback until next manual action.
  $('easyResumeAuto').disabled=busy||!sdkReady||sequencePaused;
  if(!chosen?.isTest&&$('easyAutoNext').checked)$('easyAutoNext').checked=false;
  const awaiting=list.filter(x=>x.result==='A classificar');
@@ -115,7 +116,7 @@ if(sequencePaused)notice('queueStatus','Fila pausada neste navegador. Finalize o
 const t=$('rows');t.replaceChildren();for(const x of list.slice(0,1000)){const tr=document.createElement('tr');for(const value of [x.name,x.phone,x.status,x.attempts,x.owner?view.users.find(u=>u.id===x.owner)?.name||'Reservado':'—']){const td=document.createElement('td');td.textContent=String(value??'');tr.appendChild(td)}t.appendChild(tr);}
 easyRender();
 }
-async function refresh(){view=await request('view');profile=view.user;const ids=new Set(view.campaigns.map(x=>x.id));if(!ids.has(campaignId)){campaignId=ids.has(localStorage.getItem(KEY))?localStorage.getItem(KEY):view.campaigns[0]?.id||''}$('auth').classList.add('hidden');$('dashboard').classList.add('ready');$('logout').classList.remove('hidden');show()}
+async function refresh(){view=await request('view');profile=view.user;const ids=new Set(view.campaigns.map(x=>x.id));if(view.active?.campaignId&&ids.has(view.active.campaignId)){campaignId=view.active.campaignId;localStorage.setItem(KEY,campaignId)}else if(!ids.has(campaignId)){campaignId=ids.has(localStorage.getItem(KEY))?localStorage.getItem(KEY):view.campaigns[0]?.id||''}$('auth').classList.add('hidden');$('dashboard').classList.add('ready');$('logout').classList.remove('hidden');show()}
 async function action(fn){if(busy)return;busy=true;show();try{await fn();await refresh()}catch(e){status('Erro: '+err(e),'error');console.warn('Central: operação não concluída')}finally{busy=false;show();if(queuedHangup&&!autoHangupProcessing)Promise.resolve().then(processQueuedHangup)}}
 async function script(src){return new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>no(Error('Não foi possível carregar a biblioteca '+src));document.head.append(s)})}
 const pendingPhoneCalls=new Map();
@@ -260,24 +261,36 @@ $('easyImport').onclick=()=>action(async()=>{
  status('✓ Lista com '+r.count+' contatos pronta! Agora confira o telefone e clique em COMEÇAR A LIGAR.','good');
 });
 $('easyResumeAuto').onclick=()=>action(async()=>{
- const c=active(),camp=view?.campaigns.find(x=>x.id===c?.campaignId);
- if(!c||!camp?.isTest||!['Comando enviado','Resultado desconhecido'].includes(c.status))throw Error('Nenhuma ligação anterior pendente para retomar');
- if(!sdkReady||sequencePaused)throw Error('Abra o telefone Directcall e retire a pausa antes de continuar');
- if(!window.confirm('A chamada anterior com '+c.name+' JÁ ESTÁ ENCERRADA na Directcall? Ao confirmar, a Central vai registrar o resultado como A CLASSIFICAR e ligar para o próximo automaticamente.'))return;
- if(camp.paused){await request('pause',{method:'POST',data:{campaignId:c.campaignId,paused:false}});await refresh()}
- campaignId=c.campaignId;autoCampaignId=hangupBridgeReady?campaignId:null;$('easyAutoNext').checked=hangupBridgeReady;
- if(!hangupBridgeReady)status('A próxima ligação será solicitada, mas o detector de encerramento não está conectado. A sequência não pode continuar sozinha.','warn');
- $('result').value='A classificar';$('ended').checked=true;
- status('Encerrando a tentativa anterior de '+c.name+' e preparando o PRÓXIMO nome da lista...');
- const advance=await finishCurrent(true,true);
- if(advance?.kind==='dial-sent'){
-  status('Retomada: tentativa para '+advance.next+' enviada à Directcall. Aguarde o telefone de destino tocar.','good');
- }else if(advance?.kind==='end-of-list'){
-  autoCampaignId=null;
-  status('A lista terminou. Nenhuma outra chamada foi iniciada.','good');
- }else{
-  autoCampaignId=null;
-  status('Ligação anterior salva, mas a próxima não foi iniciada automaticamente. Confira o estado da fila.','warn');
+ const info=$('easyResumeFeedback');
+ try{
+  const c=active(),camp=view?.campaigns.find(x=>x.id===c?.campaignId);
+  if(!c||!camp?.isTest||!['Comando enviado','Resultado desconhecido'].includes(c.status))throw Error('Não foi encontrada uma tentativa de teste pendente nesta lista. Confira a lista selecionada.');
+  if(!sdkReady||sequencePaused)throw Error('O telefone Directcall está indisponível ou a fila está pausada. Verifique o passo 2.');
+  if(!window.confirm('A chamada com '+c.name+' REALMENTE TERMINOU no telefone Directcall e não existe nenhuma chamada ativa? Se confirmar, a Central encerrará essa tentativa e reservará o PRÓXIMO contato (nunca repetirá '+c.name+').'))return;
+  info.classList.remove('hidden');
+  info.textContent='Conferindo '+c.name+' e reservando o próximo contato no servidor...';
+  info.className='notice';
+  const advance=await request('resume-verified',{method:'POST',data:{contactId:c.id,campaignId:c.campaignId,endedConfirmed:true,noActiveCall:true}});
+  vendorCallEnded=false;lastRequestedDial=null;
+  campaignId=c.campaignId;
+  autoCampaignId=hangupBridgeReady?campaignId:null;
+  $('easyAutoNext').checked=hangupBridgeReady;
+  if(!advance.next){
+   autoCampaignId=null;
+   info.textContent='A tentativa de '+c.name+' foi encerrada, mas esta lista não tem próximo contato autorizado pendente. Confira a lista no passo 1.';
+   info.className='notice warn';return;
+  }
+  if(advance.next.id===c.id)throw Error('A Central tentou repetir o contato anterior. A discagem foi impedida.');
+  info.textContent='Próximo contato RESERVADO: '+advance.next.name+'. Enviando o comando ao telefone Directcall...';
+  try{await requestOneDial(advance.next)}
+  catch(ex){throw Error('O contato '+advance.next.name+' foi reservado, mas a chamada NÃO foi confirmada pelo aplicativo: '+err(ex)+'. Não clique no botão de repetir '+c.name+'.')}
+  info.textContent='✓ Comando de ligação enviado para '+advance.next.name+'. Verifique se o destino toca. '+(hangupBridgeReady?'Detector de fim da chamada ativo: a próxima deverá avançar sozinha.':'O detector de encerramento ainda NÃO está conectado; a sequência não continuará automaticamente após essa chamada.');
+  info.className='notice '+(hangupBridgeReady?'good':'warn');
+  status('Retomada: '+advance.next.name+' selecionado e comando enviado ao aplicativo. O toque real ainda precisa ser confirmado.','good');
+ }catch(ex){
+  info.textContent='RETOMADA NÃO CONCLUÍDA: '+err(ex);
+  info.className='notice error';
+  throw ex;
  }
 });
 $('easyStart').onclick=()=>action(async()=>{

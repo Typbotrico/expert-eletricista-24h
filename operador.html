@@ -57,6 +57,11 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 
 .easy-result button{margin:8px 0}
 .easy-confirm{font-size:15px;font-weight:700;margin:16px 0}
+.easy-auto-check{border:1px solid #2c866f;border-radius:12px;background:#103d37;padding:13px;margin:14px 0;font-size:14px;line-height:1.5}
+.easy-auto-check input{width:20px;height:20px}
+#reviewItems{display:grid;gap:10px;margin-top:12px}.review-row{border:1px solid #365c7c;border-radius:10px;padding:12px;display:grid;gap:9px}
+.review-row strong{font-size:15px}.review-row select{width:100%;padding:10px;border-radius:9px;background:#09233b;color:#fff;border:1px solid #557994}
+
 .easy-actions{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;font-size:13px;color:#b6d1e5;margin-top:16px}
 body.easy-mode #dashboard>.stats,body.easy-mode #dashboard>.quicklinks,body.easy-mode #quickUpload,body.easy-mode #dashboard>.layout,body.easy-mode #dashboard>.card:not(#phoneCard){display:none!important}
 body.easy-mode #easyWorkspace{display:grid}
@@ -122,6 +127,7 @@ body.easy-mode #dashboard>div.flex.between p{display:none}
 </div>
 <div class="easy-step" id="easyStep3">
 <div class="easy-step-title"><span class="easy-circle">3</span><div><strong>Comece a ligar</strong><small>Uma pessoa por vez, na ordem da lista</small></div></div>
+<label class="checkbox easy-auto-check"><input id="easyAutoNext" type="checkbox"> <strong>Avanço automático:</strong> chamar o próximo contato da LISTA DE TESTE quando a Directcall confirmar o encerramento</label><p class="small muted">Opcional. Usa somente os números autorizados e deixa o resultado pendente para você classificar depois. Se a Directcall não enviar o aviso, use os botões de resultado abaixo.</p>
 <div class="easy-current"><span id="easyCallLabel">Próxima ligação</span><strong id="easyContact">Escolha sua lista acima</strong><span id="easyPhoneNumber"></span></div><div id="easyActionHint" class="easy-status" role="status">Escolha uma lista e confirme o telefone para começar.</div>
 <div id="easyStuckActions" class="easy-stuck hidden">
 <p><strong>O telefone não tocou?</strong> Confira primeiro se nenhuma chamada está ativa no aparelho Directcall.</p>
@@ -143,7 +149,7 @@ body.easy-mode #dashboard>div.flex.between p{display:none}
 </div>
 <details id="easyExtraDetails" class="easy-details"><summary>Outros detalhes do atendimento</summary>
 <div class="field"><label for="easyResult">Como foi?</label><select id="easyResult">
-<option value="">Escolha o resultado...</option><option>Atendeu</option><option>Não atendeu</option><option>Ocupado</option><option>Retornar</option><option>Sem interesse</option><option>Não ligar</option></select></div>
+<option value="">Escolha o resultado...</option><option value="A classificar" hidden>A classificar</option><option>Atendeu</option><option>Não atendeu</option><option>Ocupado</option><option>Retornar</option><option>Sem interesse</option><option>Não ligar</option></select></div>
 <div class="field hidden" id="easyReturnRow"><label for="easyCallbackAt">Dia e hora para retornar</label><input id="easyCallbackAt" type="datetime-local"></div>
 <label class="checkbox easy-confirm"><input id="easyEnded" type="checkbox"> Já desliguei no telefone da Directcall</label>
 </details>
@@ -154,6 +160,7 @@ body.easy-mode #dashboard>div.flex.between p{display:none}
 <div class="easy-actions"><button id="easyPause" type="button" class="btn secondary">⏸ Pausar ligações</button><span id="easyProgress">0 ligações feitas</span></div>
 </div>
 <div id="easyNotice" role="status" aria-live="polite" class="notice">Escolha uma lista para começar.</div>
+<details id="reviewDetails" class="easy-details hidden"><summary id="reviewSummary">Resultados para classificar depois</summary><p class="small muted">Chamadas encerradas no avanço automático. A classificação pode ser concluída aqui, sem alterar o número de tentativas.</p><div id="reviewItems"></div></details>
 </section>
 <section class="card" id="phoneCard"><div class="flex between"><div><h2>☎ Telefone integrado — Directcall</h2><p class="small muted">O telefone fica fixo nesta coluna, enquanto a fila permanece ao lado.</p></div><span class="pill">WebRTC no navegador</span></div>
 <div class="notice" id="sdkStatus">Preparando o plugin oficial da Directcall...</div>

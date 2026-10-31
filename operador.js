@@ -9,7 +9,7 @@ function setupUI(configured){$('auth').classList.remove('hidden');$('dashboard')
 const active=()=>view?.active||null;
 
 function insideCallHours(){const now=new Date(),wd=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now),tm=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);return !['Sat','Sun'].includes(wd)&&tm>='09:00'&&tm<'18:00'}
-let lastRequestedDial=null,vendorCallEnded=false,autoCampaignId=null,queuedHangup=null,autoHangupProcessing=false,hangupBridgeReady=false,hangupBridgeVersion='',hangupCallState='waiting';
+let lastRequestedDial=null,vendorCallEnded=false,autoCampaignId=null,queuedHangup=null,autoHangupProcessing=false,hangupBridgeReady=false,hangupBridgeVersion='',hangupCallState='waiting',autoOptedOut=false;
 function easyRender(){
  if(!view)return;
  const admin=view.user.role==='admin',all=view.campaigns||[],chosen=all.find(c=>c.id===campaignId);
@@ -59,6 +59,7 @@ function easyRender(){
   button.disabled=busy||sequencePaused||!sdkReady||!canFinish;
  }
  $('easyPause').disabled=busy;
+ if(chosen?.isTest&&!autoOptedOut&&!$('easyAutoNext').checked)$('easyAutoNext').checked=true;
  $('easyAutoNext').disabled=!chosen?.isTest||!sdkReady||sequencePaused||!hangupBridgeReady;
  const autoActive=autoRunning;
  $('easyAutoStatus').textContent=autoActive?(
@@ -72,7 +73,7 @@ function easyRender(){
  $('easyResumeAuto').disabled=busy||!sdkReady||sequencePaused;
  $('easyCancelAuto').classList.toggle('hidden',!autoRunning);
  $('easyCancelAuto').disabled=busy;
- if(!chosen?.isTest&&$('easyAutoNext').checked)$('easyAutoNext').checked=false;
+ if(chosen&&!chosen.isTest&&$('easyAutoNext').checked)$('easyAutoNext').checked=false;
  const awaiting=list.filter(x=>x.result==='A classificar');
  $('reviewDetails').classList.toggle('hidden',awaiting.length===0);
  $('reviewSummary').textContent='Resultados para classificar depois ('+awaiting.length+')';
@@ -142,6 +143,7 @@ window.addEventListener('message',e=>{
   hangupBridgeVersion=m.version||hangupBridgeVersion;
   const minor=Number(hangupBridgeVersion.split('.')[1]);
   hangupBridgeReady=Number.isFinite(minor)&&minor>=5;
+  if(hangupBridgeReady&&view?.campaigns.find(c=>c.id===campaignId)?.isTest&&!autoOptedOut)$('easyAutoNext').checked=true;
   notice('sdkStatus',hangupBridgeReady?'✓ Detector Chrome '+hangupBridgeVersion+' conectado. Aguarde o sinal de chamada acompanhada.':'⚠ Detector '+(hangupBridgeVersion||'sem versão')+' desatualizado. Instale a versão 0.5 para chamadas automáticas sem cliques.',hangupBridgeReady?'good':'warn');
   show();
  }
@@ -173,6 +175,11 @@ async function processQueuedHangup(){
   const c=active();
   if(!c||!lastRequestedDial||lastRequestedDial.id!==event.requestId||lastRequestedDial.contactId!==c.id||c.phone!==event.phone)return;
   if(!['Comando enviado','Resultado desconhecido'].includes(c.status)||vendorCallEnded)return;
+  // Sem evento correlacionado ao inicio efetivo da chamada, nao avancar automaticamente.
+  if(autoCampaignId===c.campaignId&&(event.source!=='directcall-hangup'||hangupCallState!=='call-started')){
+   status('Aguardando confirmacao confiavel do encerramento pelo detector Directcall. Nenhuma nova ligacao sera iniciada.','warn');
+   return;
+  }
   vendorCallEnded=true;
   $('easyEnded').checked=true;$('ended').checked=true;
   const camp=view.campaigns.find(x=>x.id===c.campaignId);
@@ -321,7 +328,7 @@ $('easyStart').onclick=()=>action(async()=>{
  // Clicar em COMEÇAR é a autorização explícita para discar a lista de testes.
  // Não mostrar prompts entre as chamadas. Desligar o modo automático é opcional.
  autoCampaignId=chosen.isTest&&$('easyAutoNext').checked&&hangupBridgeReady?campaignId:null;
- if(chosen.isTest&&!hangupBridgeReady)status('A Directcall não confirma encerramento de saída ao site. O detector Chrome não foi identificado; esta chamada não poderá avançar sozinha.','warn');
+ if(chosen.isTest&&$('easyAutoNext').checked&&!hangupBridgeReady)throw Error('O detector Chrome ainda nao esta conectado. Instale/atualize a extensao v0.5 e recarregue a Central para ligar em sequencia sem confirmacoes.');
  status(autoCampaignId?'Modo automático ativo. Aguardando eventos reais de encerramento da Directcall.':'Modo manual ativo para esta campanha.','good');
  status('Etapa 2/3: reservando o próximo contato e enviando para a Directcall...');
  await beginQueueDial();
@@ -363,6 +370,7 @@ $('easySaveOnly').onclick=()=>action(()=>easyFinish(false));
 $('easyPause').onclick=()=>{sequencePaused=!sequencePaused;if(sequencePaused)autoCampaignId=null;show();status(sequencePaused?'Fila pausada: nenhuma nova ligação será iniciada.':'Fila liberada. Clique em COMEÇAR A LIGAR para continuar.','good')};
 $('easyCancelAuto').onclick=()=>{autoCampaignId=null;$('easyAutoNext').checked=false;show();status('Modo automático desativado. A ligação atual não foi interrompida; controles manuais liberados para recuperação.','warn')};
 $('easyAutoNext').onchange=()=>{
+ autoOptedOut=!$('easyAutoNext').checked;
  if(!$('easyAutoNext').checked){
   autoCampaignId=null;status('Avanço automático desativado. A chamada atual não será interrompida.','good');
  }else{

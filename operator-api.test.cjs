@@ -241,3 +241,32 @@ test('Rico to Samira amended test campaign accepts first call without changing o
  assert.equal(dial.body.contact.status,'Comando enviado');
  assert.equal((await h.call('/api/operator/claim','POST',{campaignId:camp.id},cookie)).status,409);
 });
+
+test('safe retry for unconfirmed test dial is explicit and cannot cause unlimited calls',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Administrador',password:'VeryStrong123!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const batch=await h.call('/api/operator/test-list','POST',{name:'Um dos cinco autorizados',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907',consent:true},cookie);
+ assert.equal(batch.status,201);
+ await h.call('/api/operator/pause','POST',{campaignId:batch.body.campaign.id,paused:false},cookie);
+ const claimed=await h.call('/api/operator/claim','POST',{campaignId:batch.body.campaign.id},cookie);
+ assert.equal(claimed.body.contact.name,'Rico');
+ const id=claimed.body.contact.id;
+ const sent=await h.call('/api/operator/dial','POST',{contactId:id},cookie,'first-dial-test-123456');
+ assert.equal(sent.status,200);
+ let retry=await h.call('/api/operator/retry-test','POST',{contactId:id,checkedNoActiveCall:false},cookie);
+ assert.equal(retry.status,422);
+ await assert.rejects(()=>h.call('/api/operator/retry-test','POST',{contactId:id,checkedNoActiveCall:true},cookie),/aguarde_15_segundos/);
+ h.advance(15001);
+ retry=await h.call('/api/operator/retry-test','POST',{contactId:id,checkedNoActiveCall:true},cookie);
+ assert.equal(retry.status,200);
+ assert.equal(retry.body.contact.status,'Reservado');
+ assert.equal(retry.body.contact.attempts,1);
+ const resent=await h.call('/api/operator/dial','POST',{contactId:id},cookie,'second-dial-test-12345');
+ assert.equal(resent.status,200);
+ assert.equal(resent.body.contact.attempts,2);
+ h.advance(15001);
+ await assert.rejects(()=>h.call('/api/operator/retry-test','POST',{contactId:id,checkedNoActiveCall:true},cookie),/repeticao_nao_autorizada/);
+ const state=await h.call('/api/operator/view','GET',null,cookie);
+ assert.equal(state.body.contacts[0].attempts,2);
+});

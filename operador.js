@@ -29,8 +29,11 @@ function easyRender(){
  $('easyPhoneNumber').textContent=c?c.phone:(upcoming?.phone||'');
  const hint=!chosen?'1. Escolha uma lista de contatos.':!list.length?'Esta campanha está vazia. Importe a lista correta.':c&&c.status==='Comando enviado'?'Já existe uma tentativa registrada. Verifique se o telefone tocou antes de tentar de novo.':c&&c.status==='Resultado desconhecido'?'O comando não foi confirmado. Confira o histórico da Directcall antes de liberar este contato.':!sdkReady?'Telefone ainda não carregou. Clique em Mostrar telefone e entre na Directcall.':!chosen.isTest&&!insideCallHours()?'Esta lista é COMERCIAL e só permite chamadas das 09h às 18h, de segunda a sexta. Para testar agora, importe o CSV em uma NOVA LISTA DE TESTE autorizada.':sequencePaused?'Chamadas pausadas. Clique em Continuar ligações.':!c&&!upcoming?'Não há contatos disponíveis para ligação nesta lista.':chosen.paused?'Ao clicar em COMEÇAR, a campanha será ativada e a primeira ligação será solicitada.':'Pronto para ligar para '+(c?.name||upcoming.name)+'.';
  $('easyActionHint').textContent=hint;
- $('easyRetry').classList.toggle('hidden',!(c&&chosen?.isTest&&c.attempts<2&&['Comando enviado','Resultado desconhecido'].includes(c.status)));
+ const stuck=!!(c&&chosen?.isTest&&['Comando enviado','Resultado desconhecido'].includes(c.status));
+ $('easyStuckActions').classList.toggle('hidden',!stuck);
+ $('easyRetry').classList.toggle('hidden',!(stuck&&c.attempts<2));
  $('easyRetry').disabled=busy;
+ $('easyNoRing').disabled=busy;
  $('easyProgress').textContent=done+' de '+list.length+' concluídos';
  $('easyPause').textContent=sequencePaused?'▶ Continuar ligações':'⏸ Pausar ligações';
  $('easyStart').textContent=c&&c.status==='Reservado'?'☎ LIGAR PARA ESTE CONTATO':'▶ COMEÇAR A LIGAR';
@@ -170,6 +173,13 @@ $('easyRetry').onclick=()=>action(async()=>{
  if(!window.confirm('Antes de repetir: verifique na Directcall se NÃO há chamada ativa e se o celular NÃO tocou. Você já conferiu o aplicativo e o histórico?'))return;
  const result=await request('retry-test',{method:'POST',data:{contactId:c.id,checkedNoActiveCall:true}});
  status(c.name+' liberado para uma última tentativa de teste. Clique em COMEÇAR A LIGAR e confira o telefone. Nenhuma chamada foi disparada automaticamente.','good');
+});
+$('easyNoRing').onclick=()=>action(async()=>{
+ const c=active();const chosen=view?.campaigns.find(x=>x.id===c?.campaignId);
+ if(!c||!chosen?.isTest)throw Error('Nenhum teste em andamento para encerrar');
+ if(!window.confirm('Confirma que o telefone de '+c.name+' NÃO tocou e que NÃO existe chamada ativa na Directcall? Isso encerrará somente esta tentativa, sem iniciar outra ligação.'))return;
+ await request('no-ring',{method:'POST',data:{contactId:c.id,checkedNoActiveCall:true}});
+ status('Tentativa de '+c.name+' encerrada como NÃO TOCOU. A fila foi liberada. Escolha o próximo contato e clique em COMEÇAR A LIGAR quando estiver pronto.','good');
 });
 
 

@@ -53,7 +53,7 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 <h3>Primeiro teste em lista (até 5 telefones autorizados)</h3>
 <p class="small">Use esta opção para simular a operação em sequência com seus próprios celulares ou pessoas que autorizaram o teste. Os números são validados, a campanha começa pausada e exige seu clique para cada nova ligação.</p>
 <div class="field"><label>Nome da lista de testes</label><input id="listTestName" value="Primeiros testes Directcall" maxlength="80"></div>
-<div class="field"><label>Lista de 2 a 5 telefones (nome;telefone)</label><textarea id="listTestText" rows="5" placeholder="Meu celular;24999999999&#10;Sócio autorizado;24988888888"></textarea></div>
+<div class="field"><label>Enviar arquivo CSV de testes (até 5 números)</label><input id="listTestFile" type="file" accept=".csv,text/csv"></div><div class="field"><label>Lista de 2 a 5 telefones (nome;telefone)</label><textarea id="listTestText" rows="5" placeholder="Meu celular;24999999999&#10;Sócio autorizado;24988888888"></textarea></div>
 <label class="checkbox"><input type="checkbox" id="listTestConsent"> Confirmo que todos os destinatários concordaram expressamente em receber ligações de teste.</label>
 <div class="actions"><button class="btn green" id="createListTest" type="button">Criar campanha de teste em lista</button><button class="btn secondary" id="templateCsv" type="button">Baixar modelo CSV</button></div>
 <div class="notice" id="listTestMessage">Esta opção é para homologar até cinco contatos, inclusive fora do expediente. Para listas grandes de clientes, crie uma campanha comercial normal abaixo.</div>

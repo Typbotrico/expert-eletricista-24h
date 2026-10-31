@@ -64,7 +64,7 @@ function easyRender(){
  $('easyAutoStatus').textContent=autoActive?(hangupBridgeReady?'AUTOMÁTICO ATIVO: detector de encerramento conectado. Aguardando fim da chamada.':'AUTOMÁTICO EM ESPERA: não foi detectado um monitor confiável de encerramento.'):(hangupBridgeReady?'✓ DETECTOR DE ENCERRAMENTO ATIVO: modo automático preparado.':'⚠ DETECTOR NÃO CONECTADO. A Directcall não informa o fim das chamadas de saída ao site; instale o detector Chrome para avançar sem cliques.');
  const oldPending=!!(c&&chosen?.isTest&&['Comando enviado','Resultado desconhecido'].includes(c.status));
  $('easyResumeAuto').classList.toggle('hidden',!oldPending||vendorCallEnded);
- if(!oldPending&&$('easyResumeFeedback').classList.contains('hidden')===false&&$('easyResumeFeedback').classList.contains('error')===false){} // Preserve last operation feedback until next manual action.
+
  $('easyResumeAuto').disabled=busy||!sdkReady||sequencePaused;
  if(!chosen?.isTest&&$('easyAutoNext').checked)$('easyAutoNext').checked=false;
  const awaiting=list.filter(x=>x.result==='A classificar');

@@ -9,6 +9,7 @@ function setupUI(configured){$('auth').classList.remove('hidden');$('dashboard')
 const active=()=>view?.active||null;
 
 function insideCallHours(){const now=new Date(),wd=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',weekday:'short'}).format(now),tm=new Intl.DateTimeFormat('en-GB',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(now);return !['Sat','Sun'].includes(wd)&&tm>='09:00'&&tm<'18:00'}
+let lastRequestedDial=null,vendorCallEnded=false;
 function easyRender(){
  if(!view)return;
  const admin=view.user.role==='admin',all=view.campaigns||[],chosen=all.find(c=>c.id===campaignId);
@@ -27,9 +28,9 @@ function easyRender(){
  $('easyContact').textContent=c?c.name:chosen?(upcoming?upcoming.name:'Nenhum contato pendente nesta lista'):'Escolha uma lista acima';
  $('easyCallLabel').textContent=c?(c.status==='Reservado'?'Contato reservado':c.status==='Resultado desconhecido'?'Revisar chamada antes de avançar':'Ligação atual'):'Próxima ligação';
  $('easyPhoneNumber').textContent=c?c.phone:(upcoming?.phone||'');
- const hint=!chosen?'1. Escolha uma lista de contatos.':!list.length?'Esta campanha está vazia. Importe a lista correta.':c&&c.status==='Comando enviado'?'Já existe uma tentativa registrada. Verifique se o telefone tocou antes de tentar de novo.':c&&c.status==='Resultado desconhecido'?'O comando não foi confirmado. Confira o histórico da Directcall antes de liberar este contato.':!sdkReady?'Telefone ainda não carregou. Clique em Mostrar telefone e entre na Directcall.':!chosen.isTest&&!insideCallHours()?'Esta lista é COMERCIAL e só permite chamadas das 09h às 18h, de segunda a sexta. Para testar agora, importe o CSV em uma NOVA LISTA DE TESTE autorizada.':sequencePaused?'Chamadas pausadas. Clique em Continuar ligações.':!c&&!upcoming?'Não há contatos disponíveis para ligação nesta lista.':chosen.paused?'Ao clicar em COMEÇAR, a campanha será ativada e a primeira ligação será solicitada.':'Pronto para ligar para '+(c?.name||upcoming.name)+'.';
+ const hint=!chosen?'1. Escolha uma lista de contatos.':!list.length?'Esta campanha está vazia. Importe a lista correta.':c&&vendorCallEnded?'✓ A Directcall informou que a chamada terminou. Toque no resultado abaixo para salvar e ligar para o próximo.':c&&c.status==='Comando enviado'?'Quando terminar a chamada na Directcall, toque em um resultado abaixo para ligar para o próximo.':c&&c.status==='Resultado desconhecido'?'O comando não foi confirmado. Confira o histórico da Directcall antes de liberar este contato.':!sdkReady?'Telefone ainda não carregou. Clique em Mostrar telefone e entre na Directcall.':!chosen.isTest&&!insideCallHours()?'Esta lista é COMERCIAL e só permite chamadas das 09h às 18h, de segunda a sexta. Para testar agora, importe o CSV em uma NOVA LISTA DE TESTE autorizada.':sequencePaused?'Chamadas pausadas. Clique em Continuar ligações.':!c&&!upcoming?'Não há contatos disponíveis para ligação nesta lista.':chosen.paused?'Ao clicar em COMEÇAR, a campanha será ativada e a primeira ligação será solicitada.':'Pronto para ligar para '+(c?.name||upcoming.name)+'.';
  $('easyActionHint').textContent=hint;
- const stuck=!!(c&&chosen?.isTest&&['Comando enviado','Resultado desconhecido'].includes(c.status));
+ const stuck=!!(c&&!vendorCallEnded&&chosen?.isTest&&['Comando enviado','Resultado desconhecido'].includes(c.status));
  $('easyStuckActions').classList.toggle('hidden',!stuck);
  $('easyRetry').classList.toggle('hidden',!(stuck&&c.attempts<3));
  $('easyRetry').disabled=busy;
@@ -42,6 +43,10 @@ function easyRender(){
  $('easyResultSection').classList.toggle('hidden',!canFinish);
  $('easySaveNext').disabled=busy||sequencePaused||!sdkReady||!canFinish||!$('easyEnded').checked||!$('easyResult').value||($('easyResult').value==='Retornar'&&!$('easyCallbackAt').value);
  $('easySaveOnly').disabled=busy||!canFinish||!$('easyEnded').checked||!$('easyResult').value||($('easyResult').value==='Retornar'&&!$('easyCallbackAt').value);
+ $('easyHangupNotice').classList.toggle('hidden',!(vendorCallEnded&&canFinish));
+ for(const button of document.querySelectorAll('#easyOutcomes [data-call-result]')){
+  button.disabled=busy||sequencePaused||!sdkReady||!canFinish;
+ }
  $('easyPause').disabled=busy;
  $('easyModeToggle').textContent=document.body.classList.contains('easy-mode')?'⚙ Ver opções avançadas':'← Voltar ao modo fácil';
 }
@@ -83,6 +88,16 @@ window.addEventListener('message',e=>{
  if(m.type==='ready'){sdkReady=true;notice('sdkStatus','Telefone Directcall carregado no painel, sem sobrepor a Central. Confira Via navegador e o headset.','good');show();}
  if(m.type==='error'){sdkReady=false;notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');status('O telefone não carregou. Abra o APP Directcall e verifique a configuração.','error');show();}
  if(m.type==='dial-ack'||m.type==='probe-ack'){const pending=pendingPhoneCalls.get(m.requestId);if(!pending)return;clearTimeout(pending.timeout);pendingPhoneCalls.delete(m.requestId);m.ok?pending.resolve(m.message):pending.reject(Error(m.message||'O aplicativo não respondeu'));}
+ if(m.type==='call-ended'){
+  const c=active();
+  if(!c||!lastRequestedDial||m.requestId!==lastRequestedDial.id||m.phone!==c.phone||lastRequestedDial.phone!==c.phone)return;
+  if(!['Comando enviado','Resultado desconhecido'].includes(c.status)||vendorCallEnded)return;
+  vendorCallEnded=true;
+  $('easyEnded').checked=true;$('ended').checked=true;
+  status('✓ A Directcall informou que a chamada com '+c.name+' terminou. Escolha o resultado para SALVAR E LIGAR PARA O PRÓXIMO.','good');
+  show();
+  if(document.body.classList.contains('easy-mode'))$('easyResultSection').scrollIntoView({behavior:'smooth',block:'nearest'});
+ }
 });
 async function sdk(force=false){
  const frame=$('phoneFrame');
@@ -115,6 +130,7 @@ function sendProvider(c){
  if(!sdkReady)throw Error('Plugin Directcall ainda não carregou dentro do painel');
  const frame=$('phoneFrame');if(!frame?.contentWindow)throw Error('Painel de telefone desconectado');
  const requestId=crypto.randomUUID();
+ vendorCallEnded=false;lastRequestedDial={id:requestId,phone:c.phone,contactId:c.id,at:Date.now()};
  return new Promise((resolve,reject)=>{
   const timeout=setTimeout(()=>{pendingPhoneCalls.delete(requestId);reject(Error('O painel não confirmou o envio do comando. Confira o APP antes de qualquer nova tentativa.'))},5000);
   pendingPhoneCalls.set(requestId,{resolve,reject,timeout});
@@ -177,6 +193,23 @@ $('easyStart').onclick=()=>action(async()=>{
 $('easyResult').onchange=()=>{$('easyReturnRow').classList.toggle('hidden',$('easyResult').value!=='Retornar');show()};
 $('easyEnded').onchange=()=>show();
 $('easyCallbackAt').onchange=()=>show();
+document.querySelectorAll('#easyOutcomes [data-call-result]').forEach(button=>{
+ button.onclick=()=>action(async()=>{
+  const c=active();if(!c)throw Error('Nenhuma ligação está em atendimento');
+  if(!['Comando enviado','Resultado desconhecido','Reservado'].includes(c.status))throw Error('Finalize o contato atual antes de avançar');
+  const result=button.getAttribute('data-call-result');
+  if(result==='Retornar'){
+   $('easyResult').value='Retornar';$('easyReturnRow').classList.remove('hidden');$('easyExtraDetails').open=true;
+   status('Escolha a data e a hora do retorno. Depois clique em SALVAR E LIGAR PARA O PRÓXIMO.','warn');
+   show();return;
+  }
+  if(result==='Não ligar'&&!window.confirm('Confirma que '+c.name+' NÃO deve receber novas ligações?'))return;
+  if(!vendorCallEnded&&!window.confirm('Você já DESLIGOU a ligação com '+c.name+' no telefone da Directcall? Somente depois de desligar a Central ligará para a próxima pessoa.'))return;
+  $('easyResult').value=result;$('easyEnded').checked=true;
+  await easyFinish(true);
+ });
+});
+
 async function easyFinish(next){
  if(!$('easyEnded').checked)throw Error('Primeiro desligue no Directcall e marque a confirmação');
  if(!$('easyResult').value)throw Error('Escolha o resultado da ligação');
@@ -252,6 +285,7 @@ async function finishCurrent(dialNext){
  if(!$('result').value)throw Error('Selecione o resultado desta ligação');
  const callResult=$('result').value;
  await request('finish',{method:'POST',data:{contactId:c.id,result:callResult,notes:$('notes').value,callbackAt:$('callbackAt').value,ended:true}});
+ vendorCallEnded=false;lastRequestedDial=null;
  $('result').value='';$('notes').value='';$('callbackAt').value='';$('ended').checked=false;$('returnBox').style.display='none';
  // The previous call is committed before any next contact can be reserved or dialled.
  if(sequencePaused||!campaignId){status('Resultado salvo. Fila pausada; nenhuma chamada nova foi iniciada.','good');return}

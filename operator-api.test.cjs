@@ -712,7 +712,7 @@ test('v05 detector is armed for same call before no-click automatic continuation
  assert.match(ui,/easyStuckActions'\)\.classList\.toggle\('hidden',!stuck\|\|autoRunning/);
  assert.match(ui,/easyResumeAuto'\)\.classList\.toggle\('hidden',!oldPending\|\|vendorCallEnded\|\|autoRunning/);
  assert.match(ui,/easyResultSection'\)\.classList\.toggle\('hidden',!canFinish\|\|autoRunning/);
- assert.match(ui,/await finishCurrent\(true\)/);
+ assert.match(ui,/await request\('auto-advance'/);
  assert.match(html,/id="easyCancelAuto"/);
  assert.match(tel,/inform\('hangup-bridge-state'/);
  assert.match(tel,/message\.source==='central-autofila-extension'&&message\.type==='ended'/);

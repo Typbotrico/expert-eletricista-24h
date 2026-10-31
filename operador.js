@@ -82,7 +82,7 @@ window.addEventListener('message',e=>{
  const m=e.data;if(m?.source!=='central-phone')return;
  if(m.type==='ready'){sdkReady=true;notice('sdkStatus','Telefone Directcall carregado no painel, sem sobrepor a Central. Confira Via navegador e o headset.','good');show();}
  if(m.type==='error'){sdkReady=false;notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');status('O telefone não carregou. Abra o APP Directcall e verifique a configuração.','error');show();}
- if(m.type==='dial-ack'){const pending=pendingPhoneCalls.get(m.requestId);if(!pending)return;clearTimeout(pending.timeout);pendingPhoneCalls.delete(m.requestId);m.ok?pending.resolve():pending.reject(Error(m.message||'Comando não confirmado'));}
+ if(m.type==='dial-ack'||m.type==='probe-ack'){const pending=pendingPhoneCalls.get(m.requestId);if(!pending)return;clearTimeout(pending.timeout);pendingPhoneCalls.delete(m.requestId);m.ok?pending.resolve(m.message):pending.reject(Error(m.message||'O aplicativo não respondeu'));}
 });
 async function sdk(force=false){
  const frame=$('phoneFrame');
@@ -121,6 +121,19 @@ function sendProvider(c){
   frame.contentWindow.postMessage({source:'central-operator',type:'dial',requestId,id:c.id,name:c.name,phone:c.phone},location.origin);
  });
 }
+async function checkPhoneWithoutCall(){
+ if(!sdkReady)throw Error('Abra o aparelho Directcall e aguarde ele carregar.');
+ const frame=$('phoneFrame');if(!frame?.contentWindow)throw Error('Telefone não encontrado');
+ const requestId=crypto.randomUUID();
+ const message=await new Promise((resolve,reject)=>{
+  const timeout=setTimeout(()=>{pendingPhoneCalls.delete(requestId);reject(Error('A Directcall não respondeu ao teste. Confirme o login no APP.'))},5200);
+  pendingPhoneCalls.set(requestId,{resolve,reject,timeout});
+  frame.contentWindow.postMessage({source:'central-operator',type:'probe',requestId},location.origin);
+ });
+ status('✓ O APP Directcall respondeu ao teste SEM ligar para ninguém. Agora confirme que está conectado em Via navegador. Isso ainda não verifica se uma chamada vai tocar.','good');
+ notice('sdkStatus','APP respondeu ao teste de comunicação. Login, saldo e chamadas reais ainda precisam ser confirmados.','good');
+ return message;
+}
 async function boot(){try{const state=await request('status');if(!state.configured){setupUI(false);return}try{await refresh();await sdk();}catch{setupUI(true)}}catch(e){setupUI(true);notice('authMessage','Não foi possível conectar ao banco da Central: '+err(e),'error')}}
 $('setupForm').onsubmit=async e=>{e.preventDefault();try{const r=await request('setup',{method:'POST',data:{key:$('setupKey').value,name:$('setupName').value,password:$('setupPass').value}});$('setupPass').value='';await refresh();await sdk();}catch(ex){notice('authMessage',err(ex),'error')}};
 $('loginForm').onsubmit=async e=>{e.preventDefault();const b=$('loginButton');b.disabled=true;try{await request('login',{method:'POST',data:{username:$('username').value.trim(),password:$('password').value}});$('password').value='';await refresh();await sdk()}catch(ex){const m=err(ex);notice('authMessage',m.includes('muitas tentativas')?'Limite de segurança: aguarde 60 segundos antes de tentar novamente. Se não lembrar a senha, clique em Recuperar senha.':m,'error')}finally{b.disabled=false}};
@@ -133,6 +146,7 @@ $('campaign').onchange=e=>{campaignId=e.target.value;localStorage.setItem(KEY,ca
 $('easyModeToggle').onclick=()=>{document.body.classList.toggle('easy-mode');show();window.scrollTo({top:0,behavior:'smooth'})};
 $('easyCampaign').onchange=e=>{campaignId=e.target.value;localStorage.setItem(KEY,campaignId);show()};
 $('easyPhoneButton').onclick=()=>{$('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});try{if(sdkReady)expandPhone();else sdk(true)}catch(e){status('Não foi possível mostrar o telefone: '+err(e),'warn')}};
+$('easyProbe').onclick=()=>action(checkPhoneWithoutCall);
 $('easyFile').onchange=async()=>{
  const file=$('easyFile').files[0];if(!file)return;
  if(file.size>50000){status('Este teste aceita até cinco números. Escolha uma lista menor.','warn');$('easyFile').value='';return}
@@ -201,6 +215,7 @@ $('easyNoRing').onclick=()=>action(async()=>{
 
 $('refresh').onclick=()=>action(async()=>{status('Atualizando lista...')});
 $('checkSdk').onclick=()=>sdk(true);
+$('probePhone').onclick=()=>action(checkPhoneWithoutCall);
 $('gotoImport').onclick=()=>document.getElementById('quickUpload').scrollIntoView({behavior:'smooth',block:'start'});
 $('gotoPhone').onclick=()=>document.getElementById('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});
 $('gotoQueue').onclick=()=>document.getElementById('queueCard').scrollIntoView({behavior:'smooth',block:'start'});

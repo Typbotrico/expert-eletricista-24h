@@ -44,6 +44,12 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
    return res.end(file)
   }
   if(pathname==='/operador.js'&&req.method==='GET'){const file=fs.readFileSync(path.join(__dirname,'operador.js'));res.writeHead(200,{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(file)}
+  if(pathname==='/telefone'&&req.method==='GET'){
+   if(!authenticated(req))return fail(res,401,'entre_na_central');
+   const file=fs.readFileSync(path.join(__dirname,'telefone.html'));
+   res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"frame-ancestors 'self'"});
+   return res.end(file);
+  }
   if(!pathname.startsWith('/api/operator/'))return false;
   if(req.method!=='GET'&&!originOk(req))return fail(res,403,'origem_invalida');
   if(pathname==='/api/operator/status'&&req.method==='GET')return answer(res,200,{configured:data().users.length>0,version:'1.0.0',mode:'discagem_assistida',provider:'directcall_app_web',external_calls_auto:false,persistent:true});

@@ -135,6 +135,39 @@ function createOperatorApi({getState,transact,secret,setupKey,recoveryToken,reco
     log(d,actor.id,'lista_de_testes_autorizada');return {campaign:camp,count:ready.length};
    });return answer(res,201,result);
   }
+  // Recomeçar apenas uma campanha de TESTE. Não apaga auditoria nem desbloqueia DNC.
+  // A confirmação humana de que não existe chamada ativa é obrigatória:
+  // o APP Directcall não disponibiliza um status de linha confiável ao servidor.
+  if(pathname==='/api/operator/test-reset'&&req.method==='POST'){
+   if(actor.role!=='admin')return fail(res,403,'somente_admin');
+   const b=await parse(req);
+   if(b.confirmed!==true||b.checkedNoActiveCall!==true)return fail(res,422,'confirme_que_nao_ha_chamada_ativa_e_o_reinicio_da_lista');
+   const selected=data().campaigns.find(c=>c.id===b.campaignId);
+   if(!selected)return fail(res,404,'campanha_nao_encontrada');
+   if(!selected.isTest)return fail(res,403,'somente_lista_de_teste_autorizada');
+   const result=await transactData(async d=>{
+    const camp=d.campaigns.find(c=>c.id===b.campaignId);
+    if(!camp?.isTest)throw Error('somente_lista_de_teste_autorizada');
+    const contacts=d.contacts.filter(c=>c.campaignId===camp.id);
+    // Uma tentativa muito recente ainda pode estar tocando ou sendo encerrada.
+    const unconfirmed=contacts.find(c=>['Comando enviado','Resultado desconhecido'].includes(c.status)&&c.requestedAt&&Number.isFinite(Date.parse(c.requestedAt))&&now()-Date.parse(c.requestedAt)<30000);
+    if(unconfirmed)throw Error('aguarde_30_segundos_e_confirme_desligamento_na_directcall');
+    camp.paused=true;
+    let reset=0,blocked=0;
+    for(const c of contacts){
+     if(d.blocked.includes(c.phone)||c.status==='Não ligar'||c.result==='Não ligar'){
+      c.owner=null;blocked++;continue;
+     }
+     c.status='Pendente';c.attempts=0;c.owner=null;c.lastKey=null;
+     c.requestedAt=null;c.finishedAt=null;c.callbackAt=null;c.reservedAt=null;
+     c.result=null;c.reviewOwner=null;c.notes='Teste reiniciado; contato autorizado';
+     reset++;
+    }
+    log(d,actor.id,'lista_de_teste_reiniciada');
+    return {campaignId:camp.id,paused:true,reset,blocked,total:contacts.length,meaning:'Lista de teste reiniciada e pausada; nenhuma ligacao foi solicitada. Auditoria e bloqueios foram preservados.'};
+   });
+   return answer(res,200,result);
+  }
   if(pathname==='/api/operator/campaign'&&req.method==='POST'){
    if(actor.role!=='admin')return fail(res,403,'somente_admin');
    const b=await parse(req);if(!safe(b.name).trim())return fail(res,422,'nome_obrigatorio');

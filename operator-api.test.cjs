@@ -504,3 +504,47 @@ test('operator diagnosis distinguishes blocked attempt from reserved contact and
  assert.match(ui,/\$\('easyDialDiagnosis'\)\.textContent=/);
  new vm.Script(ui,{filename:'operador.js'});
 });
+
+test('atomic resume ends Rico and reserves Igor in ONE operation with no duplicate dial',async()=>{
+ const h=harness();
+ const setup=await h.call('/api/operator/setup','POST',{key:'T'.repeat(40),name:'Admin',password:'VeryStrong123!!'});
+ const cookie=setup.headers['Set-Cookie'].split(';')[0];
+ const created=await h.call('/api/operator/test-list','POST',{name:'Sequencia autorizada',text:'Nome;Telefone\nRico;24993285944\nIgor;24992002907\nBernardo;24993147385',consent:true},cookie);
+ assert.equal(created.status,201);
+ const campaignId=created.body.campaign.id;
+ await h.call('/api/operator/pause','POST',{campaignId,paused:false},cookie);
+ const rico=(await h.call('/api/operator/claim','POST',{campaignId},cookie)).body.contact;
+ assert.equal(rico.name,'Rico');
+ await h.call('/api/operator/dial','POST',{contactId:rico.id},cookie,'rico-attempt-confirm-123456789');
+ const withoutConfirmation=await h.call('/api/operator/resume-verified','POST',{contactId:rico.id,campaignId,endedConfirmed:false,noActiveCall:true},cookie);
+ assert.equal(withoutConfirmation.status,422);
+ const wrongCampaign=await h.call('/api/operator/resume-verified','POST',{contactId:rico.id,campaignId:'invalid',endedConfirmed:true,noActiveCall:true},cookie);
+ assert.equal(wrongCampaign.status,409);
+ const response=await h.call('/api/operator/resume-verified','POST',{contactId:rico.id,campaignId,endedConfirmed:true,noActiveCall:true},cookie);
+ assert.equal(response.status,200);
+ assert.equal(response.body.finished.name,'Rico');
+ assert.equal(response.body.finished.result,'A classificar');
+ assert.equal(response.body.next.name,'Igor');
+ assert.equal(response.body.next.status,'Reservado');
+ assert.equal(response.body.next.attempts,0,'atomic reserve must NOT initiate a phone call');
+ const state=await h.call('/api/operator/view','GET',null,cookie);
+ assert.equal(state.body.active.name,'Igor');
+ assert.equal(state.body.contacts.find(c=>c.id===rico.id).owner,null);
+ assert.equal(state.body.contacts.find(c=>c.name==='Bernardo').status,'Pendente');
+ const again=await h.call('/api/operator/resume-verified','POST',{contactId:rico.id,campaignId,endedConfirmed:true,noActiveCall:true},cookie);
+ assert.equal(again.status,409,'repeating resume must not start a duplicate call');
+});
+test('operator resume screen uses atomic endpoint, not disjoint finish-and-claim',()=>{
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const js=fs.readFileSync(path.join(__dirname,'operador.js'),'utf8');
+ const html=fs.readFileSync(path.join(__dirname,'operador.html'),'utf8');
+ const resume=js.slice(js.indexOf("$('easyResumeAuto').onclick="),js.indexOf("$('easyStart').onclick="));
+ assert.match(resume,/request\('resume-verified'/);
+ assert.doesNotMatch(resume,/await finishCurrent\(/);
+ assert.match(resume,/if\(advance\.next\.id===c\.id\)/);
+ assert.match(resume,/await requestOneDial\(advance\.next\)/);
+ assert.match(resume,/RETOMADA NÃO CONCLUÍDA/);
+ assert.match(html,/id="easyResumeFeedback"/);
+ assert.match(js,/if\(view\.active\?\.campaignId&&ids\.has\(view\.active\.campaignId\)\)/);
+ new vm.Script(js,{filename:'operador.js'});
+});

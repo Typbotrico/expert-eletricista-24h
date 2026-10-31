@@ -251,7 +251,7 @@ $('easyResumeAuto').onclick=()=>action(async()=>{
  if(!c||!camp?.isTest||!['Comando enviado','Resultado desconhecido'].includes(c.status))throw Error('Nenhuma ligação anterior pendente para retomar');
  if(!sdkReady||sequencePaused)throw Error('Abra o telefone Directcall e retire a pausa antes de continuar');
  if(!window.confirm('A chamada anterior com '+c.name+' JÁ ESTÁ ENCERRADA na Directcall? Ao confirmar, a Central vai registrar o resultado como A CLASSIFICAR e ligar para o próximo automaticamente.'))return;
- if(camp.paused)await request('pause',{method:'POST',data:{campaignId:c.campaignId,paused:false}});
+ if(camp.paused){await request('pause',{method:'POST',data:{campaignId:c.campaignId,paused:false}});await refresh()}
  campaignId=c.campaignId;autoCampaignId=campaignId;$('easyAutoNext').checked=true;
  $('result').value='A classificar';$('ended').checked=true;
  await finishCurrent(true,true);

@@ -39,11 +39,22 @@ function sendToBrowser(command){
 }
 // O app oficial responde {state:true} após processar api.cmd.
 // Isso confirma processamento do comando, não autenticação nem toque.
-let pendingVendorAck=null;
+let pendingVendorAck=null,latestCallRequest=null,callEndedRelayed=false;
 window.addEventListener('message',e=>{
  const f=document.getElementById('directcall-app-web');
- if(e.source!==f?.contentWindow||e.origin!=='https://www.directcallsoft.com')return;
- if(!e.data||typeof e.data!=='object'||e.data.state!==true||!pendingVendorAck)return;
+ if(e.origin!=='https://www.directcallsoft.com'&&e.origin!=='https://directcallsoft.com')return;
+ const message=e.data;
+ // O aplicativo oficial envia {data:"Chamada encerrada!"} ao opener.
+ // Quando essa mensagem alcança este quadro, encaminhamos ao atendente.
+ // Não tratar acknowledgements {state:true} como finalização.
+ if(message&&typeof message==='object'&&message.data==='Chamada encerrada!'){
+  if(latestCallRequest&&!callEndedRelayed&&Date.now()-latestCallRequest.at<7200000){
+   callEndedRelayed=true;
+   inform('call-ended',{requestId:latestCallRequest.id,phone:latestCallRequest.phone,source:'directcall-hangup'});
+  }
+  return;
+ }
+ if(e.source!==f?.contentWindow||!message||typeof message!=='object'||message.state!==true||!pendingVendorAck)return;
  const pending=pendingVendorAck;pendingVendorAck=null;clearTimeout(pending.timer);
  inform(pending.type,{requestId:pending.id,ok:true,message:'APP recebeu e processou o comando; não confirma toque nem ligação atendida'});
 });
@@ -90,6 +101,7 @@ expand();
 // "Ligar a partir do software integrado" (actionCall) está habilitado.
 // position=0 significa comando direto, acionado explicitamente pelo usuário.
 // Campos: posição | chamar | telefone | ID | nome.
+latestCallRequest={id:String(m.requestId||''),phone:String(m.phone||''),at:Date.now()};callEndedRelayed=false;
 requestVendorAck('0|chamar|'+m.phone+'|'+id+'|'+name,'dial-ack',m.requestId);
 }catch(e){inform('dial-ack',{requestId:String(m.requestId||''),ok:false,message:String(e?.message||e)})}
 }});

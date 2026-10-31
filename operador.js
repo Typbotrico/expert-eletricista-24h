@@ -84,13 +84,24 @@ window.addEventListener('message',e=>{
  if(m.type==='error'){sdkReady=false;notice('sdkStatus','Erro no telefone integrado: '+String(m.message||'Verifique o navegador'),'error');status('O telefone não carregou. Abra o APP Directcall e verifique a configuração.','error');show();}
  if(m.type==='dial-ack'){const pending=pendingPhoneCalls.get(m.requestId);if(!pending)return;clearTimeout(pending.timeout);pendingPhoneCalls.delete(m.requestId);m.ok?pending.resolve():pending.reject(Error(m.message||'Comando não confirmado'));}
 });
-async function sdk(){
+async function sdk(force=false){
  const frame=$('phoneFrame');
  if(!frame)throw Error('Painel de telefone não encontrado');
- if(active()&&['Comando enviado','Resultado desconhecido'].includes(active().status)){
-   notice('sdkStatus','Finalize a chamada em andamento antes de recarregar o telefone.','warn');return;
+ const alreadyLoaded=!!frame.getAttribute('src');
+ const staleAttempt=!!(active()&&['Comando enviado','Resultado desconhecido'].includes(active().status));
+ // A recorded attempt does not prove an actual phone call. Always allow
+ // loading the phone on initial page load, including after an interrupted attempt.
+ if(alreadyLoaded&&!force){
+   if(sdkReady){notice('sdkStatus','Telefone já aberto. Confira Via navegador na Directcall.','good');return;}
+   notice('sdkStatus','O telefone ainda está carregando. Se não aparecer, use Reconectar interface.','warn');return;
  }
- sdkReady=false;notice('sdkStatus','Abrindo telefone isolado dentro do cartão...');
+ // On deliberate reload of a running frame, get confirmation only if the
+ // database indicates a pending attempt. Never block the initial mount.
+ if(alreadyLoaded&&force&&staleAttempt){
+   if(!window.confirm('Existe uma tentativa de ligação registrada. Antes de reiniciar o telefone, confira que NÃO há chamada ativa na Directcall. Você já verificou isso?'))return;
+ }
+ sdkReady=false;
+ notice('sdkStatus',staleAttempt?'Abrindo telefone. Existe uma tentativa anterior pendente no histórico, mas ela não impede o carregamento.':'Abrindo telefone isolado dentro do cartão...');
  frame.src='/telefone?ts='+Date.now();
  show();
 }
@@ -121,7 +132,7 @@ $('campaign').onchange=e=>{campaignId=e.target.value;localStorage.setItem(KEY,ca
 
 $('easyModeToggle').onclick=()=>{document.body.classList.toggle('easy-mode');show();window.scrollTo({top:0,behavior:'smooth'})};
 $('easyCampaign').onchange=e=>{campaignId=e.target.value;localStorage.setItem(KEY,campaignId);show()};
-$('easyPhoneButton').onclick=()=>{$('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});try{if(sdkReady)expandPhone();else sdk()}catch(e){status('Não foi possível mostrar o telefone: '+err(e),'warn')}};
+$('easyPhoneButton').onclick=()=>{$('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});try{if(sdkReady)expandPhone();else sdk(true)}catch(e){status('Não foi possível mostrar o telefone: '+err(e),'warn')}};
 $('easyFile').onchange=async()=>{
  const file=$('easyFile').files[0];if(!file)return;
  if(file.size>50000){status('Este teste aceita até cinco números. Escolha uma lista menor.','warn');$('easyFile').value='';return}
@@ -184,12 +195,12 @@ $('easyNoRing').onclick=()=>action(async()=>{
 
 
 $('refresh').onclick=()=>action(async()=>{status('Atualizando lista...')});
-$('checkSdk').onclick=()=>sdk();
+$('checkSdk').onclick=()=>sdk(true);
 $('gotoImport').onclick=()=>document.getElementById('quickUpload').scrollIntoView({behavior:'smooth',block:'start'});
 $('gotoPhone').onclick=()=>document.getElementById('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});
 $('gotoQueue').onclick=()=>document.getElementById('queueCard').scrollIntoView({behavior:'smooth',block:'start'});
 $('testMic').onclick=async()=>{const b=$('testMic'),out=$('micState');b.disabled=true;let stream,ctx;try{if(!navigator.mediaDevices?.getUserMedia)throw Error('Navegador sem permissão de microfone');stream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});const AudioCtor=window.AudioContext||window.webkitAudioContext;if(!AudioCtor)throw Error('AudioContext indisponível');ctx=new AudioCtor();const source=ctx.createMediaStreamSource(stream),analyser=ctx.createAnalyser();source.connect(analyser);analyser.fftSize=1024;const values=new Uint8Array(analyser.fftSize);let peak=0;out.textContent='Microfone autorizado. Fale por 2 segundos para verificar o sinal...';for(let i=0;i<8;i++){await new Promise(resolve=>setTimeout(resolve,250));analyser.getByteTimeDomainData(values);let sum=0;for(const v of values){const n=(v-128)/128;sum+=n*n}peak=Math.max(peak,Math.sqrt(sum/values.length))}out.textContent=peak>0.006?'✓ Microfone captando sua voz. Abra o Directcall APP e confirme Via navegador.':'Microfone autorizado, mas a voz não foi detectada. Confira a entrada selecionada no Windows.'}catch(e){out.textContent='Não foi possível testar: '+(e?.name==='NotAllowedError'?'permita o microfone nas configurações do Chrome.':err(e))}finally{stream?.getTracks().forEach(t=>t.stop());try{await ctx?.close()}catch{}b.disabled=false}};
-$('openPhone').onclick=async()=>{try{if(!sdkReady){await sdk();return}expandPhone();document.getElementById('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});notice('sdkStatus','Telefone está dentro do painel. Confirme Via navegador no APP.','good')}catch(e){notice('sdkStatus','Não foi possível mostrar: '+err(e)+'. Clique em Reconectar interface.','warn')}};
+$('openPhone').onclick=async()=>{try{if(!sdkReady){await sdk(true);return}expandPhone();document.getElementById('phoneCard').scrollIntoView({behavior:'smooth',block:'start'});notice('sdkStatus','Telefone está dentro do painel. Confirme Via navegador no APP.','good')}catch(e){notice('sdkStatus','Não foi possível mostrar: '+err(e)+'. Clique em Reconectar interface.','warn')}};
 $('next').onclick=()=>action(async()=>{const r=await request('claim',{method:'POST',data:{campaignId}});status('Contato reservado: '+r.contact.name+'. Confira a Directcall antes de ligar.','good')});
 $('skip').onclick=()=>action(async()=>{const c=active();if(!c)return;await request('skip',{method:'POST',data:{contactId:c.id}});status('Contato pulado. Selecione o próximo.')});
 async function requestOneDial(c){

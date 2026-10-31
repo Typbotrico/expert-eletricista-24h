@@ -10,14 +10,17 @@ main{max-width:1320px;margin:auto;padding:24px 19px 70px}h1{font-size:clamp(25px
 .list{max-height:330px;overflow:auto;border:1px solid #365a7c;border-radius:11px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:9px;border-bottom:1px solid #35516c;text-align:left;vertical-align:top}th{position:sticky;top:0;background:#19405f}td.num{font-variant-numeric:tabular-nums}
 #auth{max-width:485px;margin:55px auto}.hidden{display:none!important}#dashboard{display:none}#dashboard.ready{display:block}#returnBox{display:none}#admin{display:none}#provider{min-height:60px}.checkbox{display:flex;align-items:center;gap:9px;margin:13px 0;font-size:13px}.checkbox input{width:18px;height:18px}
 footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13px;display:inline-block;border:2px solid #76cfff;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-/* Telefone Directcall posicionado dentro do cartão, nunca flutuando no canto da tela. */
-.directcall-dock{display:flex;align-items:flex-start;justify-content:center;min-height:585px;width:100%;padding:14px 8px;border:1px solid #456786;border-radius:14px;background:#071b30;overflow:hidden;position:relative}
-.dock-placeholder{min-height:535px;max-width:330px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;gap:10px;color:#afcee5;font-size:13px}
-.dock-placeholder strong{font-size:18px;color:#f0f8ff}
-#directcallDock #directcall-frame-web{position:relative!important;top:auto!important;right:auto!important;bottom:auto!important;left:auto!important;z-index:1!important;display:block!important;overflow:hidden!important;flex:none!important;width:350px!important;max-width:100%!important;min-height:550px!important;height:550px!important;margin:0 auto!important;box-sizing:border-box!important}
-#directcallDock #directcall-frame-app-close{width:100%!important;max-width:100%!important}
-#directcallDock #directcall-app-web{display:block!important;width:100%!important;max-width:100%!important;min-height:505px!important;height:505px!important;border:0!important}
-#directcallDock #directcall-app-web-btn{position:absolute!important;right:0!important;bottom:auto!important;top:0!important}
+/* Proteção de layout: o script e a janela flutuante da Directcall ficam
+   dentro do iframe local. Nenhum estilo deles interfere na Central. */
+.directcall-dock{display:block;width:100%;min-height:620px;border:1px solid #456786;border-radius:14px;background:#fff;overflow:hidden;position:relative;isolation:isolate}
+#phoneFrame{display:block;width:100%;height:620px;min-height:620px;border:0;background:white}
+#quickUpload{border-color:#3c7796;background:#113452;margin:16px 0}
+#quickUpload .flex{align-items:stretch}#quickUpload .field{margin:10px 0}
+.quicklinks{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0}
+.quicklinks button{font-weight:750}
+.layout>div{min-width:0}
+#phoneCard{overflow:hidden}
+@media(max-width:650px){.directcall-dock,#phoneFrame{min-height:650px;height:650px}}
 @media(max-width:850px){.layout{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}@media(max-width:550px){header{padding:12px}.stats{gap:8px}.stat,.card{padding:14px}main{padding:18px 10px 55px}.stat strong{font-size:24px}.btn{padding:10px 12px}}
 </style></head><body>
 <header><div class="logo"><span class="mark">☎</span><div><div>CENTRAL DE LIGAÇÕES</div><div class="sub">Discador progressivo · Instituto Avance</div></div></div><div class="flex"><span id="userLabel" class="pill">Acesso protegido</span><button class="btn secondary hidden" id="logout">Sair</button></div></header>
@@ -44,12 +47,25 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 <section id="dashboard">
 <div class="flex between"><div><h1>Atendimento em lista</h1><p>Uma chamada por vez, com bloqueio de duplicidades e resultados centralizados.</p></div><div class="pill">Operação protegida · 09h–18h, seg–sex</div></div>
 <div class="stats"><div class="stat"><span>Total da campanha</span><strong id="total">0</strong></div><div class="stat"><span>Aguardando ligação</span><strong id="pending">0</strong></div><div class="stat"><span>Concluídos</span><strong id="finished">0</strong></div><div class="stat"><span>Não ligar</span><strong id="blocked">0</strong></div></div>
+<div class="quicklinks" aria-label="Acesso rápido à operação"><button class="btn secondary" id="gotoImport" type="button">📂 Importar lista CSV</button><button class="btn secondary" id="gotoPhone" type="button">☎ Ver telefone</button><button class="btn secondary" id="gotoQueue" type="button">▶ Ver fila de chamadas</button></div>
+<section id="quickUpload" class="card"><h2>1. Importar contatos e preparar campanha</h2>
+<p class="small">Você pode carregar CSV ou colar uma lista. Use <strong>Nome;Telefone</strong> com DDD. Se já tiver uma campanha criada, selecione-a no campo Campanha abaixo antes de importar.</p>
+<h3>Primeiro teste em lista (até 5 telefones autorizados)</h3>
+<p class="small">Use esta opção para simular a operação em sequência com seus próprios celulares ou pessoas que autorizaram o teste. Os números são validados, a campanha começa pausada e exige seu clique para cada nova ligação.</p>
+<div class="field"><label>Nome da lista de testes</label><input id="listTestName" value="Primeiros testes Directcall" maxlength="80"></div>
+<div class="field"><label>Lista de 2 a 5 telefones (nome;telefone)</label><textarea id="listTestText" rows="5" placeholder="Meu celular;24999999999&#10;Sócio autorizado;24988888888"></textarea></div>
+<label class="checkbox"><input type="checkbox" id="listTestConsent"> Confirmo que todos os destinatários concordaram expressamente em receber ligações de teste.</label>
+<div class="actions"><button class="btn green" id="createListTest" type="button">Criar campanha de teste em lista</button><button class="btn secondary" id="templateCsv" type="button">Baixar modelo CSV</button></div>
+<div class="notice" id="listTestMessage">Esta opção é para homologar até cinco contatos, inclusive fora do expediente. Para listas grandes de clientes, crie uma campanha comercial normal abaixo.</div>
+<h3>Nova campanha comercial</h3><label class="checkbox"><input type="checkbox" id="isTest"> Campanha de teste (somente números privados autorizados fora do expediente)</label><div class="flex"><input id="newCampaign" placeholder="Nome da campanha" style="flex:1;background:#081b30;color:white;border:1px solid #507594;border-radius:9px;padding:11px"><button class="btn" id="createCampaign">Criar</button></div>
+<h3 style="margin-top:18px">Importar contatos</h3><p class="small">Cole nomes e telefones separados por ponto e vírgula ou importe um CSV. A fila elimina repetidos e respeita a lista de bloqueados.</p>
+<div class="field"><label>Arquivo CSV</label><input id="csv" type="file" accept=".csv,text/csv"></div><div class="field"><label>Ou colar contatos</label><textarea id="contactsText" placeholder="Maria;24999999999&#10;José;24988888888"></textarea></div>
+<div class="actions"><button class="btn" id="import">Importar contatos</button><button class="btn warn" id="toggleCampaign">Pausar / retomar campanha</button></div><p id="importStatus" class="small"></p>
+</section>
 <div class="layout"><div>
 <section class="card" id="phoneCard"><div class="flex between"><div><h2>☎ Telefone integrado — Directcall</h2><p class="small muted">O telefone fica fixo nesta coluna, enquanto a fila permanece ao lado.</p></div><span class="pill">WebRTC no navegador</span></div>
 <div class="notice" id="sdkStatus">Preparando o plugin oficial da Directcall...</div>
-<div id="directcallDock" class="directcall-dock" aria-label="Telefone oficial Directcall integrado">
-<div id="phonePlaceholder" class="dock-placeholder"><span style="font-size:28px">☎</span><strong>Telefone Directcall</strong><span>O aparelho será exibido aqui. Acesse sua conta no APP e selecione “Via navegador”.</span></div>
-</div>
+<div id="directcallDock" class="directcall-dock" aria-label="Telefone oficial Directcall integrado"><iframe id="phoneFrame" title="Telefone oficial Directcall — áudio no computador" allow="microphone; autoplay" referrerpolicy="same-origin" loading="eager"></iframe></div>
 <div class="actions"><button class="btn green" id="openPhone" type="button">☎ Mostrar telefone</button><button class="btn secondary" id="testMic" type="button">🎙 Testar microfone</button><button class="btn secondary" id="checkSdk" type="button">Reconectar interface</button><a class="btn secondary" href="https://painel.directcallsoft.com/login" target="_blank" rel="noopener noreferrer">Área Directcall</a></div>
 <p class="small muted" id="micState">Teste de microfone local: não gravamos nem transmitimos áudio durante a verificação.</p>
 <p class="small muted">Use o headset, mantenha “Via navegador” no APP e fale com o contato nesta mesma tela. O plugin não confirma sozinho o encerramento: finalize no APP e registre o resultado antes da próxima ligação.</p></section>
@@ -63,22 +79,12 @@ footer{color:#9ebbd2;font-size:12px;margin-top:25px}.loader{width:13px;height:13
 <label class="checkbox"><input id="selfOwned" type="checkbox">Confirmo que este telefone é meu ou que tenho autorização explícita do titular para receber a ligação de teste.</label>
 <button id="createSelfTest" class="btn green" type="button">Criar teste individual</button>
 <div class="notice" id="selfMessage">Usaremos créditos apenas depois que você selecionar o contato e clicar em Ligar. Nenhuma chamada é iniciada ao criar o teste.</div>
-<h3>Primeiro teste em lista (até 5 telefones autorizados)</h3>
-<p class="small">Use esta opção para simular a operação em sequência com seus próprios celulares ou pessoas que autorizaram o teste. Os números são validados, a campanha começa pausada e exige seu clique para cada nova ligação.</p>
-<div class="field"><label>Nome da lista de testes</label><input id="listTestName" value="Primeiros testes Directcall" maxlength="80"></div>
-<div class="field"><label>Lista de 2 a 5 telefones (nome;telefone)</label><textarea id="listTestText" rows="5" placeholder="Meu celular;24999999999&#10;Sócio autorizado;24988888888"></textarea></div>
-<label class="checkbox"><input type="checkbox" id="listTestConsent"> Confirmo que todos os destinatários concordaram expressamente em receber ligações de teste.</label>
-<div class="actions"><button class="btn green" id="createListTest" type="button">Criar campanha de teste em lista</button><button class="btn secondary" id="templateCsv" type="button">Baixar modelo CSV</button></div>
-<div class="notice" id="listTestMessage">Esta opção é para homologar até cinco contatos, inclusive fora do expediente. Para listas grandes de clientes, crie uma campanha comercial normal abaixo.</div>
-<h3>Nova campanha comercial</h3><label class="checkbox"><input type="checkbox" id="isTest"> Campanha de teste (somente números privados autorizados fora do expediente)</label><div class="flex"><input id="newCampaign" placeholder="Nome da campanha" style="flex:1;background:#081b30;color:white;border:1px solid #507594;border-radius:9px;padding:11px"><button class="btn" id="createCampaign">Criar</button></div>
-<h3 style="margin-top:18px">Importar contatos</h3><p class="small">Cole nomes e telefones separados por ponto e vírgula ou importe um CSV. A fila elimina repetidos e respeita a lista de bloqueados.</p>
-<div class="field"><label>Arquivo CSV</label><input id="csv" type="file" accept=".csv,text/csv"></div><div class="field"><label>Ou colar contatos</label><textarea id="contactsText" placeholder="Maria;24999999999&#10;José;24988888888"></textarea></div>
-<div class="actions"><button class="btn" id="import">Importar contatos</button><button class="btn warn" id="toggleCampaign">Pausar / retomar campanha</button></div><p id="importStatus" class="small"></p>
+
 <h3 style="margin-top:24px">Novo operador (até quatro)</h3><div class="field"><label>Nome</label><input id="agentName" placeholder="Nome do vendedor"></div><div class="field"><label>Usuário</label><input id="agentUsername" placeholder="vendedor1"></div><div class="field"><label>Senha provisória forte</label><input type="password" id="agentPassword" minlength="12" placeholder="Mínimo 12 caracteres"></div><button class="btn secondary" id="createAgent">Adicionar operador</button>
 <p class="muted small" id="agents"></p>
 </section></div>
 <div>
-<section class="card"><h2>Discador de lista — chamadas em sequência</h2><div class="notice good" id="batchHelp">Importe quantos contatos precisar (até 3.000 por arquivo), ative a campanha e clique em <strong>Iniciar fila</strong>. Depois de encerrar cada chamada, selecione o resultado e clique em <strong>Salvar e ligar próximo</strong>.</div><div class="notice" id="queueStatus">Carregando estado da fila...</div><div class="actions"><button class="btn green" id="startQueue" type="button">▶ Iniciar fila e ligar</button><button class="btn secondary" id="stopQueue" type="button">⏸ Pausar novas chamadas</button></div><div class="actions"><button class="btn secondary" id="next" type="button">Reservar sem ligar</button><button class="btn secondary" id="skip" type="button">Pular contato reservado</button></div>
+<section class="card" id="queueCard"><h2>Discador de lista — chamadas em sequência</h2><div class="notice good" id="batchHelp">Importe quantos contatos precisar (até 3.000 por arquivo), ative a campanha e clique em <strong>Iniciar fila</strong>. Depois de encerrar cada chamada, selecione o resultado e clique em <strong>Salvar e ligar próximo</strong>.</div><div class="notice" id="queueStatus">Carregando estado da fila...</div><div class="actions"><button class="btn green" id="startQueue" type="button">▶ Iniciar fila e ligar</button><button class="btn secondary" id="stopQueue" type="button">⏸ Pausar novas chamadas</button></div><div class="actions"><button class="btn secondary" id="next" type="button">Reservar sem ligar</button><button class="btn secondary" id="skip" type="button">Pular contato reservado</button></div>
 <div class="current"><div class="lbl">Contato em atendimento</div><div class="big" id="currentName">Nenhum contato selecionado</div><div class="phone" id="currentPhone">—</div><div class="small muted" id="currentInfo">Selecione um contato da fila.</div></div>
 <div class="actions"><button class="btn green" id="call">☎ Ligar no Directcall</button></div><div id="message" class="notice">A ligação só será solicitada depois do seu clique. Não há rediscagem automática.</div>
 <h3 style="margin-top:25px">Resultado da ligação</h3><div class="field"><label>Classificação</label><select id="result"><option value="">Selecionar resultado...</option><option>Atendeu</option><option>Não atendeu</option><option>Ocupado</option><option>Retornar</option><option>Sem interesse</option><option>Não ligar</option></select></div>
